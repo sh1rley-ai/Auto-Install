@@ -1,6 +1,6 @@
 {
   "ai_models": {
-    "kimi_api_key":"sk-BwTRwbOVi10BOKL4jnaqgDZXOOHp6VMJoVZpOhlLiXeycf5H",
-    "deepseek_api_key":"sk-4b6a9eab315a4a1597a2b4c39bda179b"
+    "kimi_api_key":"",
+    "deepseek_api_key":""
   }
 }

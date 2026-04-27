@@ -1,6 +1,6 @@
 from http import HTTPStatus
 import dashscope
-dashscope.api_key_file_path='/mnt/workspace/src/config/qwen_api_key_xf.txt'
+dashscope.api_key_file_path=''
 
 class QueryTongyi:
     #return format: 
