@@ -1,4 +1,4 @@
-# DEV_SPEC.md — Auto-Install v2 开发规范
+# DEV_SPEC.md — Auto-Install 开发规范
 
 > 本文档是项目的唯一技术权威参考。所有架构决策、模块设计、开发规范均以本文档为准。
 
