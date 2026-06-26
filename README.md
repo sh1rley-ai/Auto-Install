@@ -335,13 +335,6 @@ class CustomLogger(InstallationLogger):
 - [Kimi](https://kimi.moonshot.cn/) - 搜索功能支持
 - [Qwen](https://tongyi.aliyun.com/) - AI模型支持
 
-## 📞 支持
-
-如果您遇到问题或有建议，请：
-
-1. 查看 [Issues](https://github.com/your-repo/auto_install/issues)
-2. 创建新的 Issue
-3. 查看生成的日志文件获取详细错误信息
 
 ---
 
