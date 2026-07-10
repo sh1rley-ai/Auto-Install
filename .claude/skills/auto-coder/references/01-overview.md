@@ -22,7 +22,7 @@ Auto-Install 是一个基于 LangGraph 的多 Agent 系统，能够自动化安�
 
 面向求职实战的 AI Agent 工程项目，核心展示能力：
 
-- 基于 LangGraph 的 Plan-and-Execute 多 Agent 架构（Planner + Executor + Replanner）
+- 基于 LangGraph 的 Plan-and-Execute 多 Agent 架构（Planner + Executor + Verifier，规划 / 执行 / 验证三权分离）
 - Agent 执行闭环：CoT 推理 -> 结构化 Tool Calling -> 结果反馈 -> 重试 / 重规划
 - 模块化 MCP Server（环境探测 / 联网搜索 / 受控 shell 执行）
 - 短期 + 长期双层记忆：阈值触发 LLM 摘要 + 成功路径 LLM 蒸馏入库

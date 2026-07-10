@@ -2,15 +2,20 @@
 
 ### 多 Agent 架构设计
 
-#### 为什么是双 Agent 而不是更多
+#### 为什么是这三个 Agent
 
 多 Agent 的拆分边界应当跟随「决策职责」而非「工具种类」：
 
 - **Planner Agent**（Deepseek-reasoner）：唯一职责是维护计划——初始规划、根据执行反馈重规划（增 / 删 / 改步骤）。它看到的是全局：安装目标、环境信息、长期记忆、各步骤执行摘要
-- **Executor Agent**（Deepseek + Tool Calling）：唯一职责是完成当前步骤——CoT 推理后选择工具（搜索 / shell 执行），观察结果决定重试或宣告本步完成 / 失败。它看到的是局部：当前步骤描述、本步内的执行历史
+- **Executor Agent**（Deepseek-chat + Tool Calling）：唯一职责是完成当前步骤——CoT 推理后选择工具（搜索 / shell 执行），观察结果决定重试或宣告本步完成 / 失败。它看到的是局部：当前步骤描述、本步内的执行历史
+- **Verifier Agent**（Deepseek-chat + Tool Calling）：唯一职责是验证安装可用性。与 Executor 共用同一套子图代码，差异只在三处配置：
+  - **空白上下文**：只拿到「装了什么 + 环境信息」，不带安装过程的消息历史。这是为了消除自评偏差（self-grading）——装的人给自己打分倾向打高分，典型漏网案例：命令都返回 0，但装错了 conda 环境、二进制不在 PATH、daemon 没起来
+  - **对抗性 prompt**（`prompt_verify`）：默认立场是「假设安装可能失败，用命令证明它可用」（查版本、跑最小示例），而非顺着执行记录确认成功
+  - **只读工具面**：仅允许 `run_shell` 的只读类命令（查版本 / 查路径 / 跑示例），不授予改系统的能力
+  - 输出结构化裁决 `{passed, evidence, failure_reason}`，写入 `AgentState.verdict`；failed 时 `failure_reason` 注入 Planner 的重规划上下文，驱动补救循环
 - 搜索、环境探测、shell 执行是**工具**（MCP Tools），不是 Agent——它们没有决策职责，拆成独立 Agent 只会增加通信开销和不确定性
 
-这种拆分的收益：Planner 的上下文不被每步的 stdout/stderr 噪音污染，Executor 的上下文不需要携带完整全局历史，两侧 token 消耗和错误率同时下降。
+这种拆分的收益：Planner 的上下文不被每步的 stdout/stderr 噪音污染，Executor 的上下文不需要携带完整全局历史，token 消耗和错误率同时下降；Executor 与 Verifier 构成 Generator-Critic（生成者-批判者）分离，验证结论不受安装过程叙述的诱导。Verifier 的新增成本约等于一个新 prompt——子图代码完全复用。
 
 #### 状态与协作协议
 
@@ -27,7 +32,8 @@ class AgentState(TypedDict):
     memory_context: str           # 长期记忆检索结果
     plan: list[PlanStep]          # Planner 维护的计划状态
     current_step_id: int
-    executor_messages: list       # Executor 当前步骤内的消息（步骤间清空）
+    executor_messages: list       # 子图局部消息（Executor 步骤间清空，Verifier 进入时置空）
+    verdict: dict                 # Verifier 裁决 {passed, evidence, failure_reason}
     consecutive_failures: int     # 连续失败步数，触发重规划
     replan_count: int             # 重规划次数上限保护
     step_count: int               # 全局步数上限保护
@@ -39,7 +45,7 @@ class AgentState(TypedDict):
 graph = StateGraph(AgentState)
 graph.add_node("planner", plan_node)          # 生成 / 修订计划
 graph.add_node("executor", executor_subgraph) # 执行当前步骤（内部闭环）
-graph.add_node("verifier", verify_node)       # 全部步骤完成后验证可用性
+graph.add_node("verifier", verifier_subgraph) # Verifier Agent（复用 Executor 子图，独立 prompt + 空白上下文）
 graph.add_node("memorize", memorize_node)     # 蒸馏成功路径入库
 
 graph.add_edge(START, "planner")
@@ -60,7 +66,7 @@ graph.add_conditional_edges("verifier", route_verify, {
 graph.add_edge("memorize", END)
 ```
 
-Executor 内部是一个子图（executor_subgraph），实现单步闭环：
+Executor 内部是一个子图（executor_subgraph），实现单步闭环。子图由参数化工厂 `build_executor(prompt, tools, fresh_context)` 装配——换上 `prompt_verify`、只读工具面和空白上下文，同一套代码即得到 verifier_subgraph：
 
 ```
 reason_node (CoT 推理 + Tool Call)
@@ -134,7 +140,7 @@ auto_install_v2/
 ├── core/
 │   ├── __init__.py
 │   ├── agent.py                     # [NEW] LangGraph 父图（Planner/Verifier/Memorize 节点 + 路由）
-│   ├── executor.py                  # [NEW] Executor 子图（单步闭环: reason -> tool -> observe）
+│   ├── executor.py                  # [NEW] 参数化子图工厂（Executor/Verifier 共用: reason -> tool -> observe）
 │   ├── plan.py                      # [NEW] PlanStep/AgentState 定义 + 计划增删改操作
 │   ├── installer.py                 # [REFACTOR] 对外接口，内部委托给 agent.py
 │   ├── history_manager.py           # 短期记忆（阈值触发 LLM 摘要压缩）
@@ -156,7 +162,7 @@ auto_install_v2/
 │   └── get_system_summary.py        # 系统环境检测（被 mcp_server/env_probe.py 复用）
 │
 ├── prompt/
-│   └── prompt.py                    # 所有 prompt 模板集中管理（规划/执行/重规划/蒸馏）
+│   └── prompt.py                    # 所有 prompt 模板集中管理（规划/执行/重规划/验证/蒸馏）
 │
 ├── eval/
 │   ├── benchmark.jsonl              # [NEW] 150 个真实 GitHub 工具测试集
@@ -171,6 +177,7 @@ auto_install_v2/
 │   └── integration/
 │       ├── test_agent_loop.py       # Mock LLM 跑完整 Plan-and-Execute 循环
 │       ├── test_replan.py           # 连续失败触发重规划
+│       ├── test_verifier.py         # Verifier 空白上下文与裁决路由
 │       └── test_mcp_server.py       # MCP 工具端到端调用
 │
 └── logs/                            # 运行时生成，不提交 git
@@ -184,8 +191,8 @@ auto_install_v2/
 |------|------|------------|
 | `main.py` | CLI 参数解析、配置加载、启动入口、轨迹回放 | `main()`, `replay_trace()` |
 | `config/enhanced_config.py` | 三优先级配置加载、字段校验、序列化 | `EnhancedConfig`, `AIModelConfig` |
-| `core/agent.py` | 父图定义：Planner / Verifier / Memorize 节点与条件路由 | `build_graph()`, `plan_node()`, `verify_node()` |
-| `core/executor.py` | Executor 子图：CoT 推理 -> 工具调用 -> 结果反馈闭环，单步重试 | `build_executor()`, `reason_node()`, `route_tool()` |
+| `core/agent.py` | 父图定义：Planner / Memorize 节点、Verifier Agent 装配与条件路由 | `build_graph()`, `plan_node()`, `build_verifier()` |
+| `core/executor.py` | 参数化子图工厂（Executor 与 Verifier 共用）：CoT 推理 -> 工具调用 -> 结果反馈闭环 | `build_executor(prompt, tools, fresh_context)`, `reason_node()`, `route_tool()` |
 | `core/plan.py` | 计划数据结构与增删改操作，重规划 diff 计算 | `PlanStep`, `AgentState`, `apply_plan_patch()` |
 | `core/installer.py` | 对外接口，兼容旧调用方式，委托给 agent.py | `AutoInstaller.install_software()` |
 | `core/history_manager.py` | 短期记忆：历史超阈值触发 LLM 总结，保留最近 N 轮完整记录 | `HistoryManager`, `summarize_old_entries()` |
@@ -199,7 +206,7 @@ auto_install_v2/
 | `utils/kimi_search.py` | Kimi Web 搜索，tool_calls 循环处理 | `KimiSearch.get_search_res()` |
 | `utils/qwen.py` | Qwen API：摘要、蒸馏、相关性判断 | `QueryTongyi.chat()` |
 | `utils/get_system_summary.py` | 环境检测底层实现 | `get_system_summary()` |
-| `prompt/prompt.py` | prompt 模板集中管理 | `prompt_plan`, `prompt_replan`, `prompt_execute`, `prompt_distill` |
+| `prompt/prompt.py` | prompt 模板集中管理 | `prompt_plan`, `prompt_replan`, `prompt_execute`, `prompt_verify`, `prompt_distill` |
 | `eval/run_eval.py` | 在 150 工具测试集上批量运行，统计成功率与失败归因分布 | `run_benchmark()` |
 
 ### 数据流说明
@@ -237,7 +244,9 @@ auto_install_v2/
 
 [7] executor 继续执行修订后的计划 ... 全部 done
 
-[8] verifier: run_shell("docker --version") -> 输出版本号 -> success
+[8] verifier: 空白上下文启动（只给「目标: docker」+ system_info，不带安装历史）
+    -> 对抗性验证: run_shell("docker --version") + run_shell("docker run hello-world")
+    -> 裁决 {passed: true, evidence: "Docker version 27.x; hello-world 运行成功"} -> success
 
 [9] memorize:
     qwen.distill_success_path(trace) -> 剔除试错分支，仅保留有效步骤序列

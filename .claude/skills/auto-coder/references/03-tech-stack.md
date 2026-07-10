@@ -5,7 +5,7 @@
 | 模型 | 用途 | 选型理由 |
 |------|------|----------|
 | **Deepseek-reasoner** | Planner（规划 / 重规划） | 推理能力强，支持 thinking 输出，适合全局多步规划决策 |
-| **Deepseek-chat** | Executor（单步执行决策） | Tool Calling 稳定，单步决策不需要 reasoner 的成本 |
+| **Deepseek-chat** | Executor（单步执行决策）/ Verifier（可用性验证） | Tool Calling 稳定，单步决策与验证不需要 reasoner 的成本 |
 | **Kimi (moonshot-v1-128k)** | Web 搜索 | 内置 `$web_search` 工具，128k 上下文可处理完整搜索结果页 |
 | **Qwen-plus** (DashScope) | 历史摘要 / 成功路径蒸馏 / 相关性判断 | 成本低，摘要和蒸馏任务不需要最强模型 |
 

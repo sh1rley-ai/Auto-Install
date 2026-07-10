@@ -12,6 +12,7 @@ tests/
 ├── integration/
 │   ├── test_agent_loop.py           # Mock LLM，跑完整 Plan-and-Execute 循环
 │   ├── test_replan.py               # 连续失败触发重规划、重规划次数上限
+│   ├── test_verifier.py             # Verifier 空白上下文、只读约束、裁决路由
 │   └── test_mcp_server.py           # MCP 工具经 stdio 端到端调用
 └── e2e/
     └── test_install_cmake.py        # 端到端：真实安装 cmake（CI 环境执行）

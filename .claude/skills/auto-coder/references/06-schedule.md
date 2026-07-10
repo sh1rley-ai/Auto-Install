@@ -13,7 +13,7 @@ Phase 0 (完成) -> Phase 1 -> Phase 2 -> Phase 3 -> Phase 4
 
 ### Phase 1：Plan-and-Execute 多 Agent 重构（预计 4 天）
 
-**目标**：用 LangGraph 父图（Planner）+ 子图（Executor）替代单循环，引入显式计划状态与动态重规划
+**目标**：用 LangGraph 父图（Planner）+ 子图（Executor / Verifier）替代单循环，引入显式计划状态、动态重规划与独立验证
 
 #### 子任务 1.1：计划状态与操作
 
@@ -40,7 +40,17 @@ Phase 0 (完成) -> Phase 1 -> Phase 2 -> Phase 3 -> Phase 4
   - 步骤间清空 `executor_messages`，防止上下文污染
 - **验收标准**：三条路由（正常 / 重试 / 重规划）各有集成测试；`pytest tests/integration/test_replan.py`
 
-#### 子任务 1.4：接口兼容
+#### 子任务 1.4：Verifier Agent（复用子图）
+
+- **修改文件**：`core/agent.py`, `prompt/prompt.py`
+- **实现**：
+  - `build_verifier()` — 调用 `build_executor(prompt=prompt_verify, tools=只读 run_shell, fresh_context=True)` 装配 verifier_subgraph
+  - `prompt_verify` — 对抗性立场：假设安装可能失败，用命令证明可用；输出 `{passed, evidence, failure_reason}` 写入 `AgentState.verdict`
+  - failed 时 `failure_reason` 注入 Planner 重规划上下文
+- **验收标准**：Mock 场景「安装命令全部返回 0 但二进制不在 PATH」被判 failed 并路由回 planner
+- **测试方法**：`pytest tests/integration/test_verifier.py`
+
+#### 子任务 1.5：接口兼容
 
 - **修改文件**：`core/installer.py`
 - **实现**：`install_software()` 内部改为调用 `build_graph().invoke()`，保持 `main.py` 接口不变
@@ -50,7 +60,8 @@ Phase 0 (完成) -> Phase 1 -> Phase 2 -> Phase 3 -> Phase 4
 - [ ] 1.1 计划状态与操作
 - [ ] 1.2 Planner 节点与重规划
 - [ ] 1.3 Executor 子图
-- [ ] 1.4 接口兼容
+- [ ] 1.4 Verifier Agent
+- [ ] 1.5 接口兼容
 
 ---
 
@@ -151,7 +162,8 @@ Phase 0 (完成) -> Phase 1 -> Phase 2 -> Phase 3 -> Phase 4
 
 | 优先级 | 改进点 | 涉及文件 | Phase |
 |--------|--------|----------|-------|
-| P0 | Plan-and-Execute 双 Agent 重构（计划状态 + 重规划） | `core/plan.py`, `core/agent.py`, `core/executor.py` | 1 |
+| P0 | Plan-and-Execute 多 Agent 重构（计划状态 + 重规划） | `core/plan.py`, `core/agent.py`, `core/executor.py` | 1 |
+| P0 | 独立 Verifier Agent（Generator-Critic 验证分离） | `core/agent.py`, `prompt/prompt.py` | 1 |
 | P0 | MCP Server 模块化（探测/搜索/受控执行） | `mcp_server/` | 2 |
 | P0 | 长期记忆 + 成功路径蒸馏 | `core/memory_manager.py` | 3 |
 | P0 | 结构化 JSONL 日志 + 失败归因 + 回放 | `core/logger.py`, `main.py` | 3 |

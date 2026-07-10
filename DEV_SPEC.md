@@ -29,7 +29,7 @@ Auto-Install 是一个基于 LangGraph 的多 Agent 系统，能够自动化安�
 
 面向求职实战的 AI Agent 工程项目，核心展示能力：
 
-- 基于 LangGraph 的 Plan-and-Execute 多 Agent 架构（Planner + Executor + Replanner）
+- 基于 LangGraph 的 Plan-and-Execute 多 Agent 架构（Planner + Executor + Verifier，规划 / 执行 / 验证三权分离）
 - Agent 执行闭环：CoT 推理 -> 结构化 Tool Calling -> 结果反馈 -> 重试 / 重规划
 - 模块化 MCP Server（环境探测 / 联网搜索 / 受控 shell 执行）
 - 短期 + 长期双层记忆：阈值触发 LLM 摘要 + 成功路径 LLM 蒸馏入库
@@ -44,6 +44,7 @@ Auto-Install 是一个基于 LangGraph 的多 Agent 系统，能够自动化安�
 |------|------|
 | **Plan-and-Execute 架构** | Planner 生成结构化计划并维护计划状态（每步含 id / 描述 / 状态），Executor 按步执行；执行结果驱动 Planner 对计划增删改，动态重规划 |
 | **Agent 执行闭环** | Executor 每步内部：CoT 推理决策 -> Tool Calling（search / shell / finish_step）-> 结果反馈驱动下一步；失败自动重试，连续失败触发重规划 |
+| **独立 Verifier Agent** | 验证与执行分离（Generator-Critic）：Verifier 以空白上下文、对抗性立场验证安装可用性，复用 Executor 子图代码，只换 prompt 与工具面（只读 shell），输出结构化裁决 passed / evidence / failure_reason |
 | **环境感知** | 启动时自动探测 OS / 包管理器（brew / apt / yum）/ conda / sudo 权限 / GPU / CPU，注入规划上下文，同一软件在不同环境生成不同安装方案 |
 | **模块化 MCP Server** | 环境探测、联网搜索、受控 shell 执行封装为标准 MCP 工具，通过 stdio 暴露，可被 Claude Desktop 等任意 MCP 客户端直接复用 |
 | **双层记忆机制** | 短期：会话内历史超阈值自动触发 LLM 总结压缩；长期：安装成功后 LLM 蒸馏成功路径（剔除试错分支）存入 SQLite，跨会话复用 |
@@ -60,7 +61,7 @@ Auto-Install 是一个基于 LangGraph 的多 Agent 系统，能够自动化安�
 | 模型 | 用途 | 选型理由 |
 |------|------|----------|
 | **Deepseek-reasoner** | Planner（规划 / 重规划） | 推理能力强，支持 thinking 输出，适合全局多步规划决策 |
-| **Deepseek-chat** | Executor（单步执行决策） | Tool Calling 稳定，单步决策不需要 reasoner 的成本 |
+| **Deepseek-chat** | Executor（单步执行决策）/ Verifier（可用性验证） | Tool Calling 稳定，单步决策与验证不需要 reasoner 的成本 |
 | **Kimi (moonshot-v1-128k)** | Web 搜索 | 内置 `$web_search` 工具，128k 上下文可处理完整搜索结果页 |
 | **Qwen-plus** (DashScope) | 历史摘要 / 成功路径蒸馏 / 相关性判断 | 成本低，摘要和蒸馏任务不需要最强模型 |
 
@@ -114,6 +115,7 @@ tests/
 ├── integration/
 │   ├── test_agent_loop.py           # Mock LLM，跑完整 Plan-and-Execute 循环
 │   ├── test_replan.py               # 连续失败触发重规划、重规划次数上限
+│   ├── test_verifier.py             # Verifier 空白上下文、只读约束、裁决路由
 │   └── test_mcp_server.py           # MCP 工具经 stdio 端到端调用
 └── e2e/
     └── test_install_cmake.py        # 端到端：真实安装 cmake（CI 环境执行）
@@ -155,15 +157,20 @@ python eval/run_eval.py --benchmark eval/benchmark.jsonl
 
 ### 多 Agent 架构设计
 
-#### 为什么是双 Agent 而不是更多
+#### 为什么是这三个 Agent
 
 多 Agent 的拆分边界应当跟随「决策职责」而非「工具种类」：
 
 - **Planner Agent**（Deepseek-reasoner）：唯一职责是维护计划——初始规划、根据执行反馈重规划（增 / 删 / 改步骤）。它看到的是全局：安装目标、环境信息、长期记忆、各步骤执行摘要
-- **Executor Agent**（Deepseek + Tool Calling）：唯一职责是完成当前步骤——CoT 推理后选择工具（搜索 / shell 执行），观察结果决定重试或宣告本步完成 / 失败。它看到的是局部：当前步骤描述、本步内的执行历史
+- **Executor Agent**（Deepseek-chat + Tool Calling）：唯一职责是完成当前步骤——CoT 推理后选择工具（搜索 / shell 执行），观察结果决定重试或宣告本步完成 / 失败。它看到的是局部：当前步骤描述、本步内的执行历史
+- **Verifier Agent**（Deepseek-chat + Tool Calling）：唯一职责是验证安装可用性。与 Executor 共用同一套子图代码，差异只在三处配置：
+  - **空白上下文**：只拿到「装了什么 + 环境信息」，不带安装过程的消息历史。这是为了消除自评偏差（self-grading）——装的人给自己打分倾向打高分，典型漏网案例：命令都返回 0，但装错了 conda 环境、二进制不在 PATH、daemon 没起来
+  - **对抗性 prompt**（`prompt_verify`）：默认立场是「假设安装可能失败，用命令证明它可用」（查版本、跑最小示例），而非顺着执行记录确认成功
+  - **只读工具面**：仅允许 `run_shell` 的只读类命令（查版本 / 查路径 / 跑示例），不授予改系统的能力
+  - 输出结构化裁决 `{passed, evidence, failure_reason}`，写入 `AgentState.verdict`；failed 时 `failure_reason` 注入 Planner 的重规划上下文，驱动补救循环
 - 搜索、环境探测、shell 执行是**工具**（MCP Tools），不是 Agent——它们没有决策职责，拆成独立 Agent 只会增加通信开销和不确定性
 
-这种拆分的收益：Planner 的上下文不被每步的 stdout/stderr 噪音污染，Executor 的上下文不需要携带完整全局历史，两侧 token 消耗和错误率同时下降。
+这种拆分的收益：Planner 的上下文不被每步的 stdout/stderr 噪音污染，Executor 的上下文不需要携带完整全局历史，token 消耗和错误率同时下降；Executor 与 Verifier 构成 Generator-Critic（生成者-批判者）分离，验证结论不受安装过程叙述的诱导。Verifier 的新增成本约等于一个新 prompt——子图代码完全复用。
 
 #### 状态与协作协议
 
@@ -180,7 +187,8 @@ class AgentState(TypedDict):
     memory_context: str           # 长期记忆检索结果
     plan: list[PlanStep]          # Planner 维护的计划状态
     current_step_id: int
-    executor_messages: list       # Executor 当前步骤内的消息（步骤间清空）
+    executor_messages: list       # 子图局部消息（Executor 步骤间清空，Verifier 进入时置空）
+    verdict: dict                 # Verifier 裁决 {passed, evidence, failure_reason}
     consecutive_failures: int     # 连续失败步数，触发重规划
     replan_count: int             # 重规划次数上限保护
     step_count: int               # 全局步数上限保护
@@ -192,7 +200,7 @@ class AgentState(TypedDict):
 graph = StateGraph(AgentState)
 graph.add_node("planner", plan_node)          # 生成 / 修订计划
 graph.add_node("executor", executor_subgraph) # 执行当前步骤（内部闭环）
-graph.add_node("verifier", verify_node)       # 全部步骤完成后验证可用性
+graph.add_node("verifier", verifier_subgraph) # Verifier Agent（复用 Executor 子图，独立 prompt + 空白上下文）
 graph.add_node("memorize", memorize_node)     # 蒸馏成功路径入库
 
 graph.add_edge(START, "planner")
@@ -213,7 +221,7 @@ graph.add_conditional_edges("verifier", route_verify, {
 graph.add_edge("memorize", END)
 ```
 
-Executor 内部是一个子图（executor_subgraph），实现单步闭环：
+Executor 内部是一个子图（executor_subgraph），实现单步闭环。子图由参数化工厂 `build_executor(prompt, tools, fresh_context)` 装配——换上 `prompt_verify`、只读工具面和空白上下文，同一套代码即得到 verifier_subgraph：
 
 ```
 reason_node (CoT 推理 + Tool Call)
@@ -287,7 +295,7 @@ auto_install_v2/
 ├── core/
 │   ├── __init__.py
 │   ├── agent.py                     # [NEW] LangGraph 父图（Planner/Verifier/Memorize 节点 + 路由）
-│   ├── executor.py                  # [NEW] Executor 子图（单步闭环: reason -> tool -> observe）
+│   ├── executor.py                  # [NEW] 参数化子图工厂（Executor/Verifier 共用: reason -> tool -> observe）
 │   ├── plan.py                      # [NEW] PlanStep/AgentState 定义 + 计划增删改操作
 │   ├── installer.py                 # [REFACTOR] 对外接口，内部委托给 agent.py
 │   ├── history_manager.py           # 短期记忆（阈值触发 LLM 摘要压缩）
@@ -309,7 +317,7 @@ auto_install_v2/
 │   └── get_system_summary.py        # 系统环境检测（被 mcp_server/env_probe.py 复用）
 │
 ├── prompt/
-│   └── prompt.py                    # 所有 prompt 模板集中管理（规划/执行/重规划/蒸馏）
+│   └── prompt.py                    # 所有 prompt 模板集中管理（规划/执行/重规划/验证/蒸馏）
 │
 ├── eval/
 │   ├── benchmark.jsonl              # [NEW] 150 个真实 GitHub 工具测试集
@@ -324,6 +332,7 @@ auto_install_v2/
 │   └── integration/
 │       ├── test_agent_loop.py       # Mock LLM 跑完整 Plan-and-Execute 循环
 │       ├── test_replan.py           # 连续失败触发重规划
+│       ├── test_verifier.py         # Verifier 空白上下文与裁决路由
 │       └── test_mcp_server.py       # MCP 工具端到端调用
 │
 └── logs/                            # 运行时生成，不提交 git
@@ -337,8 +346,8 @@ auto_install_v2/
 |------|------|------------|
 | `main.py` | CLI 参数解析、配置加载、启动入口、轨迹回放 | `main()`, `replay_trace()` |
 | `config/enhanced_config.py` | 三优先级配置加载、字段校验、序列化 | `EnhancedConfig`, `AIModelConfig` |
-| `core/agent.py` | 父图定义：Planner / Verifier / Memorize 节点与条件路由 | `build_graph()`, `plan_node()`, `verify_node()` |
-| `core/executor.py` | Executor 子图：CoT 推理 -> 工具调用 -> 结果反馈闭环，单步重试 | `build_executor()`, `reason_node()`, `route_tool()` |
+| `core/agent.py` | 父图定义：Planner / Memorize 节点、Verifier Agent 装配与条件路由 | `build_graph()`, `plan_node()`, `build_verifier()` |
+| `core/executor.py` | 参数化子图工厂（Executor 与 Verifier 共用）：CoT 推理 -> 工具调用 -> 结果反馈闭环 | `build_executor(prompt, tools, fresh_context)`, `reason_node()`, `route_tool()` |
 | `core/plan.py` | 计划数据结构与增删改操作，重规划 diff 计算 | `PlanStep`, `AgentState`, `apply_plan_patch()` |
 | `core/installer.py` | 对外接口，兼容旧调用方式，委托给 agent.py | `AutoInstaller.install_software()` |
 | `core/history_manager.py` | 短期记忆：历史超阈值触发 LLM 总结，保留最近 N 轮完整记录 | `HistoryManager`, `summarize_old_entries()` |
@@ -352,7 +361,7 @@ auto_install_v2/
 | `utils/kimi_search.py` | Kimi Web 搜索，tool_calls 循环处理 | `KimiSearch.get_search_res()` |
 | `utils/qwen.py` | Qwen API：摘要、蒸馏、相关性判断 | `QueryTongyi.chat()` |
 | `utils/get_system_summary.py` | 环境检测底层实现 | `get_system_summary()` |
-| `prompt/prompt.py` | prompt 模板集中管理 | `prompt_plan`, `prompt_replan`, `prompt_execute`, `prompt_distill` |
+| `prompt/prompt.py` | prompt 模板集中管理 | `prompt_plan`, `prompt_replan`, `prompt_execute`, `prompt_verify`, `prompt_distill` |
 | `eval/run_eval.py` | 在 150 工具测试集上批量运行，统计成功率与失败归因分布 | `run_benchmark()` |
 
 ### 数据流说明
@@ -390,7 +399,9 @@ auto_install_v2/
 
 [7] executor 继续执行修订后的计划 ... 全部 done
 
-[8] verifier: run_shell("docker --version") -> 输出版本号 -> success
+[8] verifier: 空白上下文启动（只给「目标: docker」+ system_info，不带安装历史）
+    -> 对抗性验证: run_shell("docker --version") + run_shell("docker run hello-world")
+    -> 裁决 {passed: true, evidence: "Docker version 27.x; hello-world 运行成功"} -> success
 
 [9] memorize:
     qwen.distill_success_path(trace) -> 剔除试错分支，仅保留有效步骤序列
@@ -484,7 +495,7 @@ Phase 0 (完成) -> Phase 1 -> Phase 2 -> Phase 3 -> Phase 4
 
 ### Phase 1：Plan-and-Execute 多 Agent 重构（预计 4 天）
 
-**目标**：用 LangGraph 父图（Planner）+ 子图（Executor）替代单循环，引入显式计划状态与动态重规划
+**目标**：用 LangGraph 父图（Planner）+ 子图（Executor / Verifier）替代单循环，引入显式计划状态、动态重规划与独立验证
 
 #### 子任务 1.1：计划状态与操作
 
@@ -511,7 +522,17 @@ Phase 0 (完成) -> Phase 1 -> Phase 2 -> Phase 3 -> Phase 4
   - 步骤间清空 `executor_messages`，防止上下文污染
 - **验收标准**：三条路由（正常 / 重试 / 重规划）各有集成测试；`pytest tests/integration/test_replan.py`
 
-#### 子任务 1.4：接口兼容
+#### 子任务 1.4：Verifier Agent（复用子图）
+
+- **修改文件**：`core/agent.py`, `prompt/prompt.py`
+- **实现**：
+  - `build_verifier()` — 调用 `build_executor(prompt=prompt_verify, tools=只读 run_shell, fresh_context=True)` 装配 verifier_subgraph
+  - `prompt_verify` — 对抗性立场：假设安装可能失败，用命令证明可用；输出 `{passed, evidence, failure_reason}` 写入 `AgentState.verdict`
+  - failed 时 `failure_reason` 注入 Planner 重规划上下文
+- **验收标准**：Mock 场景「安装命令全部返回 0 但二进制不在 PATH」被判 failed 并路由回 planner
+- **测试方法**：`pytest tests/integration/test_verifier.py`
+
+#### 子任务 1.5：接口兼容
 
 - **修改文件**：`core/installer.py`
 - **实现**：`install_software()` 内部改为调用 `build_graph().invoke()`，保持 `main.py` 接口不变
@@ -521,7 +542,8 @@ Phase 0 (完成) -> Phase 1 -> Phase 2 -> Phase 3 -> Phase 4
 - [ ] 1.1 计划状态与操作
 - [ ] 1.2 Planner 节点与重规划
 - [ ] 1.3 Executor 子图
-- [ ] 1.4 接口兼容
+- [ ] 1.4 Verifier Agent
+- [ ] 1.5 接口兼容
 
 ---
 
@@ -622,7 +644,8 @@ Phase 0 (完成) -> Phase 1 -> Phase 2 -> Phase 3 -> Phase 4
 
 | 优先级 | 改进点 | 涉及文件 | Phase |
 |--------|--------|----------|-------|
-| P0 | Plan-and-Execute 双 Agent 重构（计划状态 + 重规划） | `core/plan.py`, `core/agent.py`, `core/executor.py` | 1 |
+| P0 | Plan-and-Execute 多 Agent 重构（计划状态 + 重规划） | `core/plan.py`, `core/agent.py`, `core/executor.py` | 1 |
+| P0 | 独立 Verifier Agent（Generator-Critic 验证分离） | `core/agent.py`, `prompt/prompt.py` | 1 |
 | P0 | MCP Server 模块化（探测/搜索/受控执行） | `mcp_server/` | 2 |
 | P0 | 长期记忆 + 成功路径蒸馏 | `core/memory_manager.py` | 3 |
 | P0 | 结构化 JSONL 日志 + 失败归因 + 回放 | `core/logger.py`, `main.py` | 3 |
