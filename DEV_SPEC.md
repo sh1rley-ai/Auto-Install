@@ -539,7 +539,7 @@ Phase 0 (完成) -> Phase 1 -> Phase 2 -> Phase 3 -> Phase 4
 - **验收标准**：`python main.py --install "cmake"` 正常运行
 
 **进度追踪**：
-- [ ] 1.1 计划状态与操作
+- [x] 1.1 计划状态与操作 — 新增 core/plan.py（PlanStep/AgentState 定义 + apply_plan_patch 增删改操作），9 个单测覆盖
 - [ ] 1.2 Planner 节点与重规划
 - [ ] 1.3 Executor 子图
 - [ ] 1.4 Verifier Agent
