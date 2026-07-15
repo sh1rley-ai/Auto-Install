@@ -23,7 +23,7 @@ def make_state(consecutive_failures=0):
     }
 
 
-def test_normal_route_next_step_after_successful_step():
+def test_normal_route_all_done_after_last_step_succeeds():
     llm = FakeLLM([
         '<action_json>{"type": "tool_call", "tool": "run_shell", "args": {"command": "brew install cmake"}}</action_json>',
         '<action_json>{"type": "finish_step", "status": "done", "result_summary": "installed via brew"}</action_json>',
@@ -34,6 +34,30 @@ def test_normal_route_next_step_after_successful_step():
     result = executor(make_state())
 
     assert result["consecutive_failures"] == 0
+    assert route_step_result(result, max_retries=2) == "all_done"
+
+
+def test_normal_route_next_step_when_another_step_still_pending():
+    llm = FakeLLM([
+        '<action_json>{"type": "finish_step", "status": "done", "result_summary": "installed via brew"}</action_json>',
+    ])
+    tools = {"run_shell": lambda command: f"ran {command}, returncode 0"}
+    executor = build_executor(llm, tools, max_retries=2)
+    state = {
+        "goal": "cmake",
+        "system_info": "macos",
+        "plan": [
+            {"id": 1, "description": "brew install cmake", "status": "pending", "result_summary": ""},
+            {"id": 2, "description": "verify cmake --version", "status": "pending", "result_summary": ""},
+        ],
+        "current_step_id": 1,
+        "executor_messages": [],
+        "consecutive_failures": 0,
+    }
+
+    result = executor(state)
+
+    assert result["current_step_id"] == 2
     assert route_step_result(result, max_retries=2) == "next_step"
 
 

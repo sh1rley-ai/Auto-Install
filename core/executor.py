@@ -90,20 +90,38 @@ def build_executor(
             0 if step["status"] == "done" else new_state.get("consecutive_failures", 0) + 1
         )
         new_state["executor_messages"] = []  # cleared between steps to avoid context pollution
+
+        if step["status"] == "done":
+            pending = [s for s in plan if s["status"] == "pending"]
+            new_state["current_step_id"] = pending[0]["id"] if pending else current_id
+
         return new_state
 
     return executor_node
 
 
 def route_step_result(state: AgentState, max_retries: int = DEFAULT_MAX_RETRIES) -> str:
+    """Route after one executor_node call.
+
+    executor_node advances current_step_id to the next pending step as soon as a
+    step succeeds, so current_step_id at routing time points at one of:
+    - a fresh "pending" step (previous step succeeded, more work queued)
+      -> "next_step": loop back into the executor directly for that step
+    - the just-finished "done" step (it was the last one, nothing left pending)
+      -> "all_done": hand control back to the Planner so route_plan can verify
+    - the just-failed "failed" step (executor_node never advances on failure)
+      -> "retry" if under the retry ceiling, else "replan"
+    """
     plan = state.get("plan", [])
     current_id = state.get("current_step_id")
     step = next((s for s in plan if s["id"] == current_id), None)
 
     if step is None:
         return "replan"
-    if step["status"] == "done":
+    if step["status"] == "pending":
         return "next_step"
+    if step["status"] == "done":
+        return "all_done"
     if state.get("consecutive_failures", 0) >= max_retries:
         return "replan"
     return "retry"

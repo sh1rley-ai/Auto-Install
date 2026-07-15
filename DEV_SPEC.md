@@ -543,7 +543,7 @@ Phase 0 (完成) -> Phase 1 -> Phase 2 -> Phase 3 -> Phase 4
 - [x] 1.2 Planner 节点与重规划 — 新增 core/agent.py（build_planner 工厂 + plan_node 首次规划/重规划 + route_plan 路由）；直接改造既有 prompt_plan 输出为结构化 JSON（不再新建 prompt_plan_structured），新增 prompt_replan；7 个单测（Mock LLM）覆盖。注意：prompt_plan 输出格式变更导致旧版 core/installer.py 的自由文本解析路径（main.py --install）暂时失效，待 1.5 接口兼容任务重构后恢复
 - [x] 1.3 Executor 子图 — 新增 core/executor.py（build_executor 工厂 + reason_node CoT推理/工具调用 + route_tool + route_step_result 三路由）与 prompt_execute；6 单测 + 3 集成测试（正常/重试/重规划）覆盖，均用 Mock LLM + Mock 工具
 - [x] 1.4 Verifier Agent — core/agent.py 新增 build_verifier（复用 build_executor，prompt_verify + 只读工具 + 空白上下文）+ route_verify；prompt/prompt.py 新增 prompt_verify（对抗性验证立场）；3 个集成测试覆盖通过/binary不在PATH判失败/空白上下文不泄露安装历史
-- [ ] 1.5 接口兼容
+- [x] 1.5 接口兼容 — core/agent.py 新增 build_graph（组装 planner/executor/verifier/memorize 全图）+ memorize_node（Phase 3 前的空实现桩）；core/installer.py 的 install_software 改为调用 build_graph().invoke()，恢复 main.py --install 接口；过程中发现并修复两处路由缺口：route_step_result 补充区分"pending"(推进到下一步)/"done"(all_done 交还 planner)两态，plan_node 补充 _needs_replan 判断避免每次重入误判为需要重规划；12 个新测试（含全链路 mock 集成测试 test_agent_loop.py 和 installer 接线测试）覆盖
 
 ---
 
