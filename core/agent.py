@@ -1,10 +1,12 @@
 import json
 import re
 
+from core.executor import build_executor
 from core.plan import AgentState, apply_plan_patch
-from prompt.prompt import prompt_plan, prompt_replan
+from prompt.prompt import prompt_plan, prompt_replan, prompt_verify
 
 DEFAULT_MAX_REPLANS = 3
+DEFAULT_VERIFIER_MAX_TOOL_ITERATIONS = 4
 
 
 def _extract_json_block(text: str, tag: str):
@@ -63,3 +65,55 @@ def route_plan(state: AgentState, max_replans: int = DEFAULT_MAX_REPLANS) -> str
     if plan and all(step["status"] == "done" for step in plan):
         return "verify"
     return "abort"
+
+
+def build_verifier(llm, tools, max_tool_iterations: int = DEFAULT_VERIFIER_MAX_TOOL_ITERATIONS):
+    """Factory producing a verifier_node that reuses the Executor subgraph.
+
+    Reuses build_executor with prompt_verify, a caller-supplied read-only tools map,
+    and fresh_context=True so the Verifier never sees the installation's message
+    history or plan (blank context) — this avoids self-grading bias, since the
+    agent that performed the install would tend to grade its own work favorably.
+
+    Writes the structured verdict {passed, evidence, failure_reason} into
+    AgentState.verdict for the parent graph's route_verify / replan logic.
+    """
+    executor_node = build_executor(
+        llm,
+        tools,
+        prompt=prompt_verify,
+        fresh_context=True,
+        max_tool_iterations=max_tool_iterations,
+    )
+
+    def verifier_node(state: AgentState) -> AgentState:
+        verify_state = {
+            "goal": state.get("goal", ""),
+            "system_info": state.get("system_info", ""),
+            "plan": [{
+                "id": 1,
+                "description": f"验证安装目标已正确安装并可用：{state.get('goal', '')}",
+                "status": "pending",
+                "result_summary": "",
+            }],
+            "current_step_id": 1,
+            "executor_messages": [],
+            "consecutive_failures": 0,
+        }
+        result = executor_node(verify_state)
+        verified_step = result["plan"][0]
+        passed = verified_step["status"] == "done"
+
+        new_state = dict(state)
+        new_state["verdict"] = {
+            "passed": passed,
+            "evidence": verified_step["result_summary"] if passed else "",
+            "failure_reason": "" if passed else verified_step["result_summary"],
+        }
+        return new_state
+
+    return verifier_node
+
+
+def route_verify(state: AgentState) -> str:
+    return "success" if state.get("verdict", {}).get("passed") else "failed"
