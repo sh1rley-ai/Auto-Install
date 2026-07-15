@@ -59,7 +59,7 @@ Phase 0 (完成) -> Phase 1 -> Phase 2 -> Phase 3 -> Phase 4
 **进度追踪**：
 - [x] 1.1 计划状态与操作 — 新增 core/plan.py（PlanStep/AgentState 定义 + apply_plan_patch 增删改操作），9 个单测覆盖
 - [x] 1.2 Planner 节点与重规划 — 新增 core/agent.py（build_planner 工厂 + plan_node 首次规划/重规划 + route_plan 路由）；直接改造既有 prompt_plan 输出为结构化 JSON（不再新建 prompt_plan_structured），新增 prompt_replan；7 个单测（Mock LLM）覆盖。注意：prompt_plan 输出格式变更导致旧版 core/installer.py 的自由文本解析路径（main.py --install）暂时失效，待 1.5 接口兼容任务重构后恢复
-- [ ] 1.3 Executor 子图
+- [x] 1.3 Executor 子图 — 新增 core/executor.py（build_executor 工厂 + reason_node CoT推理/工具调用 + route_tool + route_step_result 三路由）与 prompt_execute；6 单测 + 3 集成测试（正常/重试/重规划）覆盖，均用 Mock LLM + Mock 工具
 - [ ] 1.4 Verifier Agent
 - [ ] 1.5 接口兼容
 

@@ -117,3 +117,41 @@ prompt_replan = '''你是安装任务的 Planner，当前计划执行过程中�
 [...]
 </patch_json>
 '''
+
+prompt_execute = '''你是安装任务的 Executor，只负责完成当前这一个步骤，不负责整体规划。
+
+#用户安装目标
+{goal}
+
+#系统环境
+{system_info}
+
+#当前步骤
+{step_description}
+
+#本步骤内已执行的工具调用记录（JSON，可能为空）
+{executor_messages}
+
+#可用工具
+1. web_search — 搜索最新的安装文档/命令，参数 {{"query": "..."}}
+2. run_shell — 执行一条 shell 命令，返回 stdout/stderr/returncode，参数 {{"command": "..."}}
+
+#行为准则
+- 每次只能选择一个动作：调用一个工具，或宣告本步骤结束
+- 遇到需要 conda 的命令，先确保 autoinstall 环境已创建，再用 conda run -n autoinstall 执行
+- 一次只执行一个逻辑上独立的命令，不要用 && 拼接多个不相关命令
+- 结合上面的工具调用记录（stdout/stderr/returncode）判断是否需要重试或换一种方式
+
+#输出要求
+只输出以下两种 JSON 之一，包裹在 <action_json> 和 </action_json> 标签之间，不要输出任何其他内容：
+
+调用工具：
+<action_json>
+{{"type": "tool_call", "tool": "run_shell", "args": {{"command": "..."}}}}
+</action_json>
+
+宣告本步骤结束（status 为 "done" 或 "failed"）：
+<action_json>
+{{"type": "finish_step", "status": "done", "result_summary": "..."}}
+</action_json>
+'''
