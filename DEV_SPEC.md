@@ -13,14 +13,15 @@ Auto-Install 是一个基于 LangGraph 的多 Agent 系统，能够自动化安�
 
 **目标**：在命令行直接输入想要安装的工具，系统自动完成搜索、规划、安装与可用性验证。
 
-**核心理念**：将软件安装建模为 Plan-and-Execute 双 Agent 协作过程。Planner 负责生成并维护一份可增删改的结构化计划（Plan State）；Executor 按步执行，每步内部走「CoT 推理决策 -> 工具调用 -> 结果反馈驱动下一步」的闭环；执行结果回传 Planner，失败时先重试，连续失败触发动态重规划。
+**核心理念**：将软件安装建模为 Plan-and-Execute 多 Agent 协作过程，由 LangGraph 状态机编排规划 / 执行 / 验证三个 Agent。Planner 负责生成并维护一份可增删改的结构化计划（Plan State）；Executor 按步执行，每步内部走「CoT 推理决策 -> 工具调用 -> 结果反馈驱动下一步」的闭环；执行结果回传 Planner，失败时先重试，连续失败触发动态重规划；全部步骤完成后由独立的 Verifier 以空白上下文对抗性验证安装可用性，不通过则回到 Planner 补救。
 
 **背景**：当下技术迭代日益增长的时代，每天都有很多新技术的产生，比如刚出现的 deepseek-ocr，很多人都想快速尝鲜。但这个过程最重要的是配置环境安装该项目，费时且对新手复杂。而安装本质上是一个确定性过程：只要安装方案正确，大模型可以通过搜索找到合适路径并正确执行，大幅提升环境安装效率。
 
 **设计原则**：
 
-- **Plan-and-Execute 双 Agent**：Planner 先生成全局计划并全程维护计划状态（可增/删/改步骤），Executor 逐步执行；相比单步 ReAct 循环，全局计划显著降低方向性错误
+- **Plan-and-Execute 多 Agent**：Planner 先生成全局计划并全程维护计划状态（可增/删/改步骤），Executor 逐步执行；相比单步 ReAct 循环，全局计划显著降低方向性错误
 - **执行闭环 + 动态重规划**：每步执行结果（含错误输出）反馈给 Executor 自我修正重试；连续失败超过阈值时上报 Planner 重规划，而非无限重试
+- **验证与执行分离（Generator-Critic）**：独立 Verifier Agent 复用 Executor 子图代码，以空白上下文 + 对抗性 prompt + 只读工具面独立裁决安装是否真正可用，消除「装的人给自己打分」的自评偏差
 - **环境感知**：启动时自动探测 OS / 包管理器 / conda / sudo 权限 / GPU 等，注入规划与执行上下文，动态生成跨环境自适应安装方案
 - **工具层标准化**：环境探测、联网搜索、受控 shell 执行封装为独立 MCP Server，与 Agent 编排层解耦，可被任意 MCP 客户端复用
 - **可观测性**：全流程结构化日志（步骤类型 / 内容 / 时间戳），支持失败归因与执行轨迹回放
@@ -69,7 +70,7 @@ Auto-Install 是一个基于 LangGraph 的多 Agent 系统，能够自动化安�
 
 | 库 | 版本 | 用途 |
 |----|------|------|
-| `langgraph` | >=0.2 | 多 Agent 状态机编排（父图 + Executor 子图） |
+| `langgraph` | >=0.2 | 多 Agent 状态机编排（父图 + Executor / Verifier 共用子图） |
 | `langchain-core` | >=0.3 | Tool 定义、消息类型（AIMessage、ToolMessage） |
 | `mcp` | >=1.0 | MCP Server 实现（FastMCP，stdio transport） |
 | `langchain-mcp-adapters` | >=0.1 | Agent 侧加载 MCP 工具为 LangChain Tool |
@@ -86,12 +87,12 @@ Auto-Install 是一个基于 LangGraph 的多 Agent 系统，能够自动化安�
 LangGraph 的 StateGraph 完全匹配 Plan-and-Execute 结构：
 
 - 计划状态（plan: list[PlanStep]）就是图的一等公民 State 字段，Planner 对它的增删改天然可追踪
-- 父图（Planner 循环）+ 子图（Executor 闭环）的嵌套结构直接表达双 Agent 协作
-- 条件边表达「重试 / 重规划 / 完成」的路由，比手写 while 循环清晰可控
+- 父图（Planner 循环）+ 子图（Executor / Verifier 单步闭环）的嵌套结构直接表达多 Agent 协作；同一套子图工厂换 prompt 与工具面即得到 Verifier
+- 条件边表达「重试 / 重规划 / 验证 / 完成」的路由，比手写 while 循环清晰可控
 - 内置 Checkpointer 直接解决会话内状态持久化（短期记忆的载体）
 - 可视化状态图便于调试和面试展示
 
-LangChain AgentExecutor 的局限：单 Agent ReAct 循环，无法表达显式计划状态和双层循环结构。
+LangChain AgentExecutor 的局限：单 Agent ReAct 循环，无法表达显式计划状态、双层循环结构，也无法把验证拆成独立 Agent。
 
 ### 为什么工具层用 MCP 而非普通函数
 
@@ -125,12 +126,12 @@ tests/
 
 - 单元测试 Mock 所有外部依赖（LLM API / 网络 / subprocess），不调用真实 API
 - 长期记忆测试使用内存 SQLite（`:memory:`）
-- 集成测试对三条路由（正常执行 / 重试 / 重规划）各建完整用例
+- 集成测试对四条路由（正常执行 / 重试 / 重规划 / 验证裁决）各建完整用例；Verifier 用例需断言其上下文不含安装过程历史
 
 ### 端到端评估（Benchmark）
 
 - **测试集**：`eval/benchmark.jsonl`，150 个真实 GitHub 工具（覆盖 pip / brew / apt / 源码编译 / conda 等多种安装形态）
-- **指标**：端到端成功率（安装完成且可用性验证通过）；当前结果 **72%**
+- **指标**：端到端成功率（安装完成且 Verifier 裁决 passed）；当前结果 **72%**
 - **失败归因分布**：评估脚本按 `attribute_failure()` 结果统计失败类别，指导后续优化方向
 - **运行**：`python eval/run_eval.py --benchmark eval/benchmark.jsonl --report eval/report.md`
 
@@ -139,7 +140,7 @@ tests/
 | 层次 | 覆盖率目标 | 说明 |
 |------|-----------|------|
 | Unit | >80% | 计划操作、记忆、受控执行全覆盖 |
-| Integration | 关键路径 | 正常执行 / 重试 / 重规划三条路由各有完整测试用例 |
+| Integration | 关键路径 | 正常执行 / 重试 / 重规划 / 验证裁决四条路由各有完整测试用例 |
 | E2E | Benchmark | 150 工具测试集端到端成功率 >=72%，常用软件（cmake/git）>90% |
 
 ### 运行命令

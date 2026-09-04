@@ -13,7 +13,7 @@
 
 | 库 | 版本 | 用途 |
 |----|------|------|
-| `langgraph` | >=0.2 | 多 Agent 状态机编排（父图 + Executor 子图） |
+| `langgraph` | >=0.2 | 多 Agent 状态机编排（父图 + Executor / Verifier 共用子图） |
 | `langchain-core` | >=0.3 | Tool 定义、消息类型（AIMessage、ToolMessage） |
 | `mcp` | >=1.0 | MCP Server 实现（FastMCP，stdio transport） |
 | `langchain-mcp-adapters` | >=0.1 | Agent 侧加载 MCP 工具为 LangChain Tool |
@@ -30,12 +30,12 @@
 LangGraph 的 StateGraph 完全匹配 Plan-and-Execute 结构：
 
 - 计划状态（plan: list[PlanStep]）就是图的一等公民 State 字段，Planner 对它的增删改天然可追踪
-- 父图（Planner 循环）+ 子图（Executor 闭环）的嵌套结构直接表达双 Agent 协作
-- 条件边表达「重试 / 重规划 / 完成」的路由，比手写 while 循环清晰可控
+- 父图（Planner 循环）+ 子图（Executor / Verifier 单步闭环）的嵌套结构直接表达多 Agent 协作；同一套子图工厂换 prompt 与工具面即得到 Verifier
+- 条件边表达「重试 / 重规划 / 验证 / 完成」的路由，比手写 while 循环清晰可控
 - 内置 Checkpointer 直接解决会话内状态持久化（短期记忆的载体）
 - 可视化状态图便于调试和面试展示
 
-LangChain AgentExecutor 的局限：单 Agent ReAct 循环，无法表达显式计划状态和双层循环结构。
+LangChain AgentExecutor 的局限：单 Agent ReAct 循环，无法表达显式计划状态、双层循环结构，也无法把验证拆成独立 Agent。
 
 ### 为什么工具层用 MCP 而非普通函数
 

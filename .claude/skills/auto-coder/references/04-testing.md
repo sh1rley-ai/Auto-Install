@@ -22,12 +22,12 @@ tests/
 
 - 单元测试 Mock 所有外部依赖（LLM API / 网络 / subprocess），不调用真实 API
 - 长期记忆测试使用内存 SQLite（`:memory:`）
-- 集成测试对三条路由（正常执行 / 重试 / 重规划）各建完整用例
+- 集成测试对四条路由（正常执行 / 重试 / 重规划 / 验证裁决）各建完整用例；Verifier 用例需断言其上下文不含安装过程历史
 
 ### 端到端评估（Benchmark）
 
 - **测试集**：`eval/benchmark.jsonl`，150 个真实 GitHub 工具（覆盖 pip / brew / apt / 源码编译 / conda 等多种安装形态）
-- **指标**：端到端成功率（安装完成且可用性验证通过）；当前结果 **72%**
+- **指标**：端到端成功率（安装完成且 Verifier 裁决 passed）；当前结果 **72%**
 - **失败归因分布**：评估脚本按 `attribute_failure()` 结果统计失败类别，指导后续优化方向
 - **运行**：`python eval/run_eval.py --benchmark eval/benchmark.jsonl --report eval/report.md`
 
@@ -36,7 +36,7 @@ tests/
 | 层次 | 覆盖率目标 | 说明 |
 |------|-----------|------|
 | Unit | >80% | 计划操作、记忆、受控执行全覆盖 |
-| Integration | 关键路径 | 正常执行 / 重试 / 重规划三条路由各有完整测试用例 |
+| Integration | 关键路径 | 正常执行 / 重试 / 重规划 / 验证裁决四条路由各有完整测试用例 |
 | E2E | Benchmark | 150 工具测试集端到端成功率 >=72%，常用软件（cmake/git）>90% |
 
 ### 运行命令
