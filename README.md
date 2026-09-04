@@ -1,4 +1,4 @@
-# 自动化软件安装助手 (Auto-Installer)
+# DeployBot
 
 一个智能的命令行自动化软件安装程序，支持在Linux服务器和Mac电脑上自动安装各种软件。具有智能历史管理和详细日志记录功能。
 
@@ -82,7 +82,7 @@ python main.py --show-config
 ## 📁 项目结构
 
 ```
-auto_install/
+DeployBot/
 ├── main.py                 # 主入口文件
 ├── requirements.txt        # 依赖列表
 ├── README.md              # 项目说明

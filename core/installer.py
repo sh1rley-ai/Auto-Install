@@ -12,7 +12,7 @@ from .logger import InstallationLogger
 DEFAULT_SHELL_TIMEOUT_SECONDS = 120
 
 
-class AutoInstaller:
+class DeployBot:
     """
     Main class that orchestrates the automated software installation process.
 
@@ -23,7 +23,7 @@ class AutoInstaller:
 
     def __init__(self, config: Dict[str, Any]):
         """
-        Initialize the auto installer.
+        Initialize DeployBot.
 
         Args:
             config: Configuration dictionary containing API keys and settings

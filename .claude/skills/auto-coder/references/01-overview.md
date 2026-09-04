@@ -2,7 +2,7 @@
 
 ### 设计理念
 
-Auto-Install 是一个基于 LangGraph 的多 Agent 系统，能够自动化安装 CLI 工具与开源项目，面向 Linux/macOS 环境。
+DeployBot 是一个基于 LangGraph 的多 Agent 系统，能够自动化安装 CLI 工具与开源项目，面向 Linux/macOS 环境。
 
 **目标**：在命令行直接输入想要安装的工具，系统自动完成搜索、规划、安装与可用性验证。
 

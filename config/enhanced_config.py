@@ -1,6 +1,6 @@
 """
 Enhanced Configuration Management
-Provides comprehensive configuration for the auto-installation system.
+Provides comprehensive configuration for the DeployBot installation system.
 """
 
 import os
@@ -51,7 +51,7 @@ class AIModelConfig:
 
 class EnhancedConfig:
     """
-    Enhanced configuration manager for the auto-installation system.
+    Enhanced configuration manager for the DeployBot installation system.
     
     Supports loading from files, environment variables, and provides
     structured configuration objects.
@@ -223,7 +223,7 @@ class EnhancedConfig:
     
     def print_config_summary(self):
         """Print a summary of current configuration."""
-        print("=== Auto-Installer Configuration ===")
+        print("=== DeployBot Configuration ===")
         print(f"History Management:")
         print(f"  - Max rounds: {self.history.max_history_rounds}")
         print(f"  - Keep recent: {self.history.keep_recent_rounds}")

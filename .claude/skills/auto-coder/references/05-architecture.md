@@ -127,7 +127,7 @@ reason_node (CoT 推理 + Tool Call)
 ### 完整目录结构
 
 ```
-auto_install_v2/
+DeployBot/
 ├── main.py                          # CLI 入口（含 --replay 轨迹回放）
 ├── requirements.txt                 # 依赖清单
 ├── CLAUDE.md                        # 开发规范（精简版）
@@ -194,11 +194,11 @@ auto_install_v2/
 | `core/agent.py` | 父图定义：Planner / Memorize 节点、Verifier Agent 装配与条件路由 | `build_graph()`, `plan_node()`, `build_verifier()` |
 | `core/executor.py` | 参数化子图工厂（Executor 与 Verifier 共用）：CoT 推理 -> 工具调用 -> 结果反馈闭环 | `build_executor(prompt, tools, fresh_context)`, `reason_node()`, `route_tool()` |
 | `core/plan.py` | 计划数据结构与增删改操作，重规划 diff 计算 | `PlanStep`, `AgentState`, `apply_plan_patch()` |
-| `core/installer.py` | 对外接口，兼容旧调用方式，委托给 agent.py | `AutoInstaller.install_software()` |
+| `core/installer.py` | 对外接口，兼容旧调用方式，委托给 agent.py | `DeployBot.install_software()` |
 | `core/history_manager.py` | 短期记忆：历史超阈值触发 LLM 总结，保留最近 N 轮完整记录 | `HistoryManager`, `summarize_old_entries()` |
 | `core/memory_manager.py` | 长期记忆：成功后蒸馏路径入库，启动前检索相关记录 | `MemoryManager`, `distill_success_path()`, `retrieve_relevant()` |
 | `core/logger.py` | 结构化 JSONL 轨迹（step_type/content/timestamp）+ Markdown 报告 | `TraceLogger.log_step()`, `TraceLogger.attribute_failure()` |
-| `mcp_server/server.py` | FastMCP Server 入口，注册三个工具，stdio 传输 | `mcp = FastMCP("auto-install")` |
+| `mcp_server/server.py` | FastMCP Server 入口，注册三个工具，stdio 传输 | `mcp = FastMCP("deploybot")` |
 | `mcp_server/env_probe.py` | 探测 OS / 包管理器 / conda / sudo / GPU / CPU | `probe_environment()` |
 | `mcp_server/search.py` | 联网搜索安装文档 | `web_search(query)` |
 | `mcp_server/shell.py` | 受控 shell 执行：黑名单拦截、超时、全量输出捕获 | `run_shell(cmd, timeout)` |

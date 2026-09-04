@@ -21,7 +21,7 @@ prompt_planv1 = '''
 
 注意：
 1、我们安装命令是通过python的subprocess.Popen执行，对于需要cd到某个目录的，你需要首先拿到该目录的绝对路径，然后执行跟着需要执行的命令一起传递给执行端。
-2、对于需要conda执行的命令，要给定env空间，默认空间名称可以是autoinstall，你需要先create该空间，然后使用conda run的方式安装相应的应用。
+2、对于需要conda执行的命令，要给定env空间，默认空间名称可以是deploybot，你需要先create该空间，然后使用conda run的方式安装相应的应用。
 3、对于你需要尝试多次不同类型的安装命令场景时，你每次只能执行一个，不能一次性全部执行，否则不知道你尝试的具体结果。
 4、subprocess.Popen里你需要返回执行的结果，包括错误或者正确的信息，有助于后续的规划。
 5、安装一个工具前，你一定要调用搜索工具，确保获得正确的安装方式。
@@ -59,7 +59,7 @@ prompt_plan='''#### **# 角色：专家级DevOps工程师与自动化系统**
    *   **用途**：执行具体的shell命令。
    *   **行为准则**：
         *   **绝对路径**：处理文件或目录时，优先使用绝对路径。
-        *   **Conda环境**：需要使用`conda`时，必须先生成创建`autoinstall`环境的命令（如果尚未创建），然后所有后续命令都通过 `conda run -n autoinstall <command>` 执行。
+        *   **Conda环境**：需要使用`conda`时，必须先生成创建`deploybot`环境的命令（如果尚未创建），然后所有后续命令都通过 `conda run -n deploybot <command>` 执行。
         *   **原子性**：一次只执行一个逻辑上独立的命令。不要将多个不相关的安装命令用`&&`连接。
         *   **返回结果**：代码必须捕获`stdout`和`stderr`，并将它们作为结果返回，以便后续步骤分析。
 
@@ -138,7 +138,7 @@ prompt_execute = '''你是安装任务的 Executor，只负责完成当前这一
 
 #行为准则
 - 每次只能选择一个动作：调用一个工具，或宣告本步骤结束
-- 遇到需要 conda 的命令，先确保 autoinstall 环境已创建，再用 conda run -n autoinstall 执行
+- 遇到需要 conda 的命令，先确保 deploybot 环境已创建，再用 conda run -n deploybot 执行
 - 一次只执行一个逻辑上独立的命令，不要用 && 拼接多个不相关命令
 - 结合上面的工具调用记录（stdout/stderr/returncode）判断是否需要重试或换一种方式
 

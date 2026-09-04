@@ -1,5 +1,5 @@
 """
-Auto-Installer Main Entry Point
+DeployBot Main Entry Point
 Enhanced automated software installation system with history management and logging.
 """
 
@@ -10,14 +10,14 @@ from pathlib import Path
 # Add src to path for backward compatibility
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from core import AutoInstaller
+from core import DeployBot
 from config.enhanced_config import EnhancedConfig
 from utils.text_processors import TextProcessor
 
 # Global configuration instance
 enhanced_config = EnhancedConfig('./config/user_config.json')
 def main():
-    """Main entry point for the auto-installer."""
+    """Main entry point for DeployBot."""
     parser = argparse.ArgumentParser(
         description="自动化软件安装助手 - 支持Linux和Mac系统",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -122,7 +122,7 @@ def main():
     # Initialize installer
     try:
         config_dict = enhanced_config.get_legacy_config_dict()
-        installer = AutoInstaller(config_dict)
+        installer = DeployBot(config_dict)
         
         if args.verbose:
             print(f"\n📋 配置信息:")
