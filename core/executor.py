@@ -1,18 +1,11 @@
 import json
-import re
 
 from core.plan import AgentState
 from prompt.prompt import prompt_execute
+from utils.text_processors import extract_tagged_json
 
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_MAX_TOOL_ITERATIONS = 6
-
-
-def _extract_json_block(text: str, tag: str):
-    match = re.search(rf"<{tag}>(.*?)</{tag}>", text, re.DOTALL)
-    if not match:
-        raise ValueError(f"no <{tag}> block found in LLM output")
-    return json.loads(match.group(1).strip())
 
 
 def reason_node(llm, prompt_template, goal, system_info, step_description, executor_messages):
@@ -21,6 +14,8 @@ def reason_node(llm, prompt_template, goal, system_info, step_description, execu
     Returns a decision dict, either:
     - {"type": "tool_call", "tool": <name>, "args": {...}}
     - {"type": "finish_step", "status": "done"|"failed", "result_summary": "..."}
+
+    Raises ValueError when the LLM output has no parsable <action_json> block.
     """
     prompt_formatted = prompt_template.format(
         goal=goal,
@@ -29,11 +24,29 @@ def reason_node(llm, prompt_template, goal, system_info, step_description, execu
         executor_messages=json.dumps(executor_messages, ensure_ascii=False),
     )
     content, _ = llm.chat(prompt_formatted)
-    return _extract_json_block(content, "action_json")
+    return extract_tagged_json(content, "action_json")
 
 
 def route_tool(decision: dict) -> str:
     return "finish_step" if decision.get("type") == "finish_step" else "tool_call"
+
+
+def invoke_tool(tools, tool_name, args) -> str:
+    """Run one tool call, turning caller-side mistakes into an observation string.
+
+    A hallucinated tool name or mismatched arguments is an LLM error the LLM can
+    fix on its next reasoning round, so it is fed back as an observation instead
+    of raising and tearing down the whole graph.
+    """
+    if not isinstance(tool_name, str) or tool_name not in tools:
+        available = ", ".join(sorted(tools)) or "(none)"
+        return f"error: unknown tool {tool_name!r}, available tools: {available}"
+    if not isinstance(args, dict):
+        return f"error: args for tool {tool_name!r} must be a JSON object"
+    try:
+        return tools[tool_name](**args)
+    except TypeError as e:
+        return f"error: invalid arguments for tool {tool_name!r}: {e}"
 
 
 def build_executor(
@@ -66,20 +79,25 @@ def build_executor(
 
         decision = {"type": "finish_step", "status": "failed", "result_summary": "exceeded max tool iterations"}
         for _ in range(max_tool_iterations):
-            decision = reason_node(
-                llm,
-                prompt_template,
-                goal=new_state.get("goal", ""),
-                system_info=new_state.get("system_info", ""),
-                step_description=step["description"],
-                executor_messages=messages,
-            )
+            try:
+                decision = reason_node(
+                    llm,
+                    prompt_template,
+                    goal=new_state.get("goal", ""),
+                    system_info=new_state.get("system_info", ""),
+                    step_description=step["description"],
+                    executor_messages=messages,
+                )
+            except ValueError as e:
+                # Unparsable output fails this step so the normal retry/replan routing takes over.
+                decision = {"type": "finish_step", "status": "failed", "result_summary": f"unparsable executor output: {e}"}
+                break
             if route_tool(decision) == "finish_step":
                 break
 
-            tool_name = decision["tool"]
+            tool_name = decision.get("tool")
             args = decision.get("args", {})
-            observation = tools[tool_name](**args)
+            observation = invoke_tool(tools, tool_name, args)
             messages.append({"tool": tool_name, "args": args, "observation": observation})
 
         step["status"] = decision.get("status", "failed")

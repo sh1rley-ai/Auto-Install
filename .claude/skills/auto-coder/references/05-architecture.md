@@ -200,16 +200,17 @@ AML-Guard/
 │
 ├── data/
 │   ├── schema.sql                   # [NEW] 交易/账户/名单/负面信息/预警表结构
-│   ├── generate_dataset.py          # [NEW] 固定 seed 合成数据生成器
-│   ├── seed.json                    # [NEW] 生成参数与 seed（提交进仓库）
-│   ├── aml_dataset.sqlite           # [NEW] 生成结果（提交进仓库，保证可复现）
-│   └── DATASET.md                   # [NEW] 数据字典、可疑模式构造说明、校验和
+│   ├── build_dataset.py             # [NEW] 公开数据集分层抽样 + 固定 seed 补全 + 写库
+│   ├── seed.json                    # [NEW] seed、原始数据集版本与 SHA256、汇率与抽样配额
+│   ├── raw/                         # 公开数据集原始文件（手动下载，不提交 git）
+│   ├── aml_dataset.sqlite           # [NEW] 构建结果（许可证允许时提交，否则由 raw + seed 重建）
+│   └── DATASET.md                   # [NEW] 数据来源与许可证、字段映射、typology 对照、校验和
 │
 ├── utils/
 │   ├── __init__.py
 │   ├── deepseek.py                  # Deepseek API 封装（streaming + retry）
 │   ├── qwen.py                      # Qwen API 封装（摘要 / 蒸馏 / 相关性判断）
-│   └── text_processors.py           # 文本抽取工具
+│   └── text_processors.py           # LLM 输出结构化块抽取（extract_tagged_json）
 │
 ├── prompt/
 │   └── prompt.py                    # 所有 prompt 模板集中管理（规划/取证/重规划/校验/研判/蒸馏）
@@ -253,7 +254,7 @@ AML-Guard/
 | `utils/deepseek.py` | Deepseek API 调用，streaming + 指数退避重试 | `Deepseek.chat()`, `Deepseek.stream_chat()` |
 | `utils/qwen.py` | Qwen API：摘要、蒸馏、相关性判断 | `QueryTongyi.chat()` |
 | `prompt/prompt.py` | prompt 模板集中管理 | `prompt_plan`, `prompt_replan`, `prompt_execute`, `prompt_verify`, `prompt_judge`, `prompt_distill` |
-| `data/generate_dataset.py` | 固定 seed 合成交易 / 账户 / 名单 / 负面信息 / 预警，注入已知可疑模式并打标 | `generate(seed)`, `inject_patterns()` |
+| `data/build_dataset.py` | 校验公开数据集原始文件 -> 按 typology 分层抽样案件 -> 截取案件子图与基线历史 -> 固定 seed 补全档案 / 名单 / 负面信息 / 预警 -> 写库并输出带标签的 benchmark | `build(seed)`, `sample_cases()`, `synthesize_enrichment()` |
 | `eval/run_eval.py` | 在标注测试集上批量运行，统计准确率与四类失败归因分布 | `run_benchmark()` |
 
 ### 规则库定义格式

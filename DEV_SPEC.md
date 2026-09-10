@@ -26,7 +26,7 @@ AML-Guard 是一个基于 LangGraph 的多 Agent 系统，面向银行与支付�
 - **结论必须附证据**：报告中每一条研判结论都携带证据引用（工具调用记录）与规则引用（监管条款出处），无证据支撑的结论不得进入报告
 - **工具层标准化**：交易数据查询、客户档案、监管规则库检索、名单筛查、负面信息检索封装为独立 MCP Server，与 Agent 编排层解耦，可被任意 MCP 客户端复用；数据访问的权限校验、字段脱敏与审计留痕在协议边界统一收口
 - **全本地数据源**：所有工具只读取仓库内的规则库与数据集，调查过程不发起任何外部网络请求；这是评测可复现的前提，也避免向外部服务泄露案件信息
-- **评测可复现**：全部交易、账户、名单、负面信息数据由固定 seed 生成并提交进仓库，任何人 clone 后跑出的 benchmark 结果与文档一致；数据是纯合成的，不含任何真实客户信息
+- **评测可复现**：评测基于公开反洗钱数据集构建，案件抽样与补全数据（档案 / 名单 / 负面信息）全部由单一固定 seed 驱动，原始文件以 SHA256 锁定版本，任何人使用同一 seed 与同一原始文件重建后跑出的 benchmark 结果与文档一致；公开数据集本身为匿名化模拟数据，不含任何真实客户信息
 - **可追溯且防篡改**：全流程结构化审查日志（步骤类型 / 内容 / 时间戳）逐条以哈希链串接，任何事后修改或删除都会使链断裂并被校验命令定位；支持失败归因与调查轨迹回放，满足合规留痕与事后复核要求
 
 ### 项目定位
@@ -38,7 +38,7 @@ AML-Guard 是一个基于 LangGraph 的多 Agent 系统，面向银行与支付�
 - 模块化 MCP Server（交易调单 / 客户档案 / 监管规则库检索 / 名单筛查 / 负面信息检索）
 - 规则引擎与 LLM 双路合规校验，审查结论附规则引用，审查日志全链路留痕
 - 短期 + 长期双层记忆：阈值触发 LLM 摘要 + 标准调查路径 LLM 蒸馏入库
-- 量化评估：基于公开反洗钱数据集构建约 200 条标注测试集，端到端调查准确率约 75%
+- 量化评估：基于公开反洗钱数据集构建约 200 条标注测试集（固定 seed 分层抽样与补全，保证可复现），端到端调查准确率约 75%
 
 ---
 
@@ -55,7 +55,7 @@ AML-Guard 是一个基于 LangGraph 的多 Agent 系统，面向银行与支付�
 | **双层记忆机制** | 短期：单次调查内消息超阈值自动触发 LLM 总结压缩；长期：调查通过校验后 LLM 蒸馏标准调查路径（剔除试错分支）存入 SQLite，同类案件跨会话复用，平均调查步骤下降约 30% |
 | **哈希链审查日志与回放** | 每步记录 step_type / content / timestamp 的 JSONL 轨迹，每条携带前一条的哈希构成防篡改链，`--verify-audit` 校验完整性并定位首个断裂点；全链路留痕支持合规回溯与轨迹回放，同时输出人类可读 Markdown 研判报告 |
 | **受控数据访问** | 交易调单与名单筛查经受控访问层：查询范围与返回条数上限、超时控制、敏感字段脱敏后入 LLM 上下文、访问全量审计留痕 |
-| **量化评估** | 基于公开反洗钱数据集构建约 200 条标注测试集，端到端调查准确率约 75%，按规划 / 工具 / 校验 / 幻觉输出四类归因统计失败分布 |
+| **量化评估** | 基于公开反洗钱数据集构建约 200 条标注测试集，以固定 seed 驱动分层抽样与补全数据生成、原始文件 SHA256 锁定版本，保证评测可复现；端到端调查准确率约 75%，按规划 / 工具 / 校验 / 幻觉输出四类归因统计失败分布 |
 
 ---
 
@@ -69,7 +69,7 @@ AML-Guard 是一个基于 LangGraph 的多 Agent 系统，面向银行与支付�
 | **Deepseek-chat** | Executor（单步取证决策）/ Verifier（证据完整性校验） | Tool Calling 稳定，单步决策与校验不需要 reasoner 的成本 |
 | **Qwen-plus** (DashScope) | 会话摘要 / 标准调查路径蒸馏 / 记忆相关性判断 | 成本低，摘要与蒸馏任务不需要最强模型 |
 
-**关于数据出域**：本项目默认走公有云 API，评测与演示数据均为固定 seed 生成的合成数据，不涉及真实客户信息。生产落地时两个 Agent 角色的模型可整体替换为私有化部署（模型接口经 `utils/` 封装层隔离，替换不影响编排层）；交易明细始终留在 MCP 工具层，只有脱敏聚合摘要进入 LLM 上下文——这是 MCP 边界收口设计的直接收益。
+**关于数据出域**：本项目默认走公有云 API，评测与演示数据为公开反洗钱数据集（本身即匿名化模拟数据）及其固定 seed 补全数据，不涉及真实客户信息。生产落地时两个 Agent 角色的模型可整体替换为私有化部署（模型接口经 `utils/` 封装层隔离，替换不影响编排层）；交易明细始终留在 MCP 工具层，只有脱敏聚合摘要进入 LLM 上下文——这是 MCP 边界收口设计的直接收益。
 
 ### 为什么不接联网检索
 
@@ -77,7 +77,7 @@ AML-Guard 是一个基于 LangGraph 的多 Agent 系统，面向银行与支付�
 
 - **评测不可复现**：本项目的核心产出之一是可复现的量化评测。联网检索结果逐日变化，同一份代码今天与下月跑出的准确率无法归因——是模型改了，还是外部网页变了。所有外部依赖必须是仓库内固定的
 - **权威性反而更差**：监管条款需要带出处、带生效日期、可按案发时点复算，这只能由策展语料库提供；搜索结果摘要是幻觉源而不是权威源
-- **成本与场景不匹配**：长上下文检索调用是全系统最重的 token 消耗，而评测集是合成数据——其中的主体在真实互联网上并不存在，检索只会返回无关真人，既是噪音也带来隐私问题
+- **成本与场景不匹配**：长上下文检索调用是全系统最重的 token 消耗，而评测集的账户与主体来自匿名化公开数据集及合成补全——在真实互联网上并不存在，检索只会返回无关真人，既是噪音也带来隐私问题
 
 因此 `search_regulations` 读本地 `rules/` 规则库与条款语料，`search_adverse_media` 读仓库内固定 seed 生成的合成负面信息语料表。系统在调查过程中**不发起任何外部网络请求**，除模型 API 之外无外部依赖。
 
@@ -92,7 +92,7 @@ AML-Guard 是一个基于 LangGraph 的多 Agent 系统，面向银行与支付�
 | `openai` | >=1.0 | Deepseek API 客户端（OpenAI 兼容协议） |
 | `dashscope` | >=1.14 | Qwen API 客户端 |
 | `pandas` | >=2.0 | 交易特征聚合（时间窗统计、对手方分布、阈值贴近度、账户历史基线统计） |
-| `numpy` | >=1.24 | 基线 z-score 计算；合成数据生成的确定性随机源（`default_rng(seed)`） |
+| `numpy` | >=1.24 | 基线 z-score 计算；数据集分层抽样与补全数据生成的确定性随机源（`default_rng(seed)`） |
 | `networkx` | >=3.0 | 资金链路图构建与关联方扩展（一度 / 二度对手方） |
 | `PyYAML` | >=6.0 | 监管规则库 YAML 定义加载 |
 | `rapidfuzz` | >=3.0 | 名单筛查模糊匹配（制裁名单的别名 / 音译 / 简繁差异） |
@@ -140,6 +140,10 @@ LangChain AgentExecutor 的局限：单 Agent ReAct 循环，无法表达显式�
 tests/
 ├── unit/
 │   ├── test_plan.py                 # 计划增删改、重规划 patch 应用
+│   ├── test_agent.py                # Planner 生成 / 重规划 / 不可解析输出降级、route_plan
+│   ├── test_executor.py             # reason_node 解析、幻觉工具名与参数错误回写 observation
+│   ├── test_text_processors.py      # extract_tagged_json 抽取与异常
+│   ├── test_config.py               # 配置三优先级加载、环境变量映射、--show-config
 │   ├── test_rule_engine.py          # 规则加载、阈值/频次/时间窗判定、条款引用输出
 │   ├── test_baseline.py             # 基线计算、z-score、样本不足时跳过规则
 │   ├── test_audit_chain.py          # 哈希链构造、篡改/插入/删除被检出并定位
@@ -161,15 +165,15 @@ tests/
 
 - 单元测试 Mock 所有外部依赖（LLM API / 数据库），不调用真实 API；除模型 API 外系统本身无网络依赖
 - 交易数据与长期记忆测试使用内存 SQLite（`:memory:`）
-- 数据集相关测试断言可复现性：同一 seed 两次生成的库校验和一致
+- 数据集相关测试断言可复现性：同一 seed 对同一原始数据 fixture 两次构建的规范化校验和一致；原始文件 SHA256 不符时拒绝构建
 - 集成测试对五条路由（正常执行 / 重试 / 重规划 / 校验裁决 / 双路合规分歧）各建完整用例；Verifier 用例需断言其上下文不含调查过程历史
-- 评测数据集不得包含真实客户信息，仅使用公开合成数据集
+- 评测数据仅使用公开反洗钱数据集（匿名化模拟数据）及其固定 seed 补全数据，不得包含真实客户信息
 
 ### 端到端评估（Benchmark）
 
-- **测试集**：`eval/benchmark.jsonl`，约 200 条标注案件，由 `data/generate_dataset.py` 以**固定 seed** 生成并连同数据库一起提交进仓库，按典型可疑模式分层构造：结构化拆分、高频跨境、快进快出（pass-through）、集中收付、名单关联、基线突变，并保留一定比例的正常样本（含活跃大额但合理的账户）用于检验误报。生成器同时输出每条案件的 ground truth 与所命中的构造模式，标注不依赖人工
-- **可复现性**：`python data/generate_dataset.py --seed <seed> --verify` 重新生成并比对校验和，任何人 clone 仓库后跑出的 benchmark 数字应与本文档一致。评测过程不访问外部网络，唯一的不确定性来源是 LLM 采样——评测时统一 `temperature=0` 并在报告中记录模型版本
-- **主指标**：端到端调查准确率——研判结论（上报 / 不上报 / 需人工复核）与标注一致，**且**报告中每条结论的证据引用可回溯；当前结果约 **75%**
+- **测试集**：`eval/benchmark.jsonl`，约 200 条标注案件，由 `data/build_dataset.py` 基于**公开反洗钱数据集**（首选 SAML-D，见子任务 2.2）以**固定 seed** 分层抽样构建，覆盖典型可疑模式：结构化拆分、高频跨境、快进快出（pass-through）、集中收付、名单关联、行为突变，并保留一定比例的正常样本（含活跃大额但合理的账户）用于检验误报。案件标签由原始数据集的交易级洗钱标签按固定口径聚合得到，名单关联等补全样本由构建脚本打标，标注不依赖人工
+- **可复现性**：同一 seed + 同一版本原始文件（SHA256 记录在 `data/seed.json`）重建出的案件集与数据库规范化校验和一致；`python data/build_dataset.py --seed <seed> --verify` 重建并比对，任何人下载同一原始数据后跑出的 benchmark 数字应与本文档一致。评测过程不访问外部网络，唯一的不确定性来源是 LLM 采样——评测时统一 `temperature=0` 并在报告中记录模型版本
+- **主指标**：端到端调查准确率——研判结论（上报 / 不上报 / 需人工复核）与标注一致，**且**报告中每条结论的证据引用可回溯；原始标签为二分类（上报 / 不上报），`needs_human_review` 不计为命中、占比单独报告；当前结果约 **75%**
 - **辅助指标**：误报率（正常样本被判上报）、漏报率（可疑样本被判不上报）、平均调查步骤数、平均 token 消耗
 - **失败归因四分类**：评估脚本按 `attribute_failure()` 结果统计，指导后续优化方向
   - `planning`：计划本身缺失关键取证步骤，或调查方向错误
@@ -185,7 +189,7 @@ tests/
 | Unit | >80% | 计划操作、规则引擎、报告校验、记忆、受控访问全覆盖 |
 | Integration | 关键路径 | 正常执行 / 重试 / 重规划 / 校验裁决 / 双路分歧五条路由各有完整测试用例 |
 | E2E | Benchmark | 约 200 条标注测试集端到端准确率 >=75%，且幻觉输出类失败占比 <5% |
-| 可复现 | 校验和一致 | 固定 seed 重新生成数据集校验和不变；同一次评测重跑结论一致 |
+| 可复现 | 校验和一致 | 同一 seed + 同一原始文件重建数据集校验和不变；同一次评测重跑结论一致 |
 
 ### 运行命令
 
@@ -193,7 +197,7 @@ tests/
 pytest tests/unit/ -v
 pytest tests/integration/ -v --timeout=30
 pytest tests/ --cov=core --cov=mcp_server --cov=utils --cov-report=term-missing
-python data/generate_dataset.py --seed 20260115 --verify
+python data/build_dataset.py --seed 20260115 --verify
 python eval/run_eval.py --benchmark eval/benchmark.jsonl
 python main.py --verify-audit logs/audit_xxx.jsonl
 ```
@@ -402,16 +406,17 @@ AML-Guard/
 │
 ├── data/
 │   ├── schema.sql                   # [NEW] 交易/账户/名单/负面信息/预警表结构
-│   ├── generate_dataset.py          # [NEW] 固定 seed 合成数据生成器
-│   ├── seed.json                    # [NEW] 生成参数与 seed（提交进仓库）
-│   ├── aml_dataset.sqlite           # [NEW] 生成结果（提交进仓库，保证可复现）
-│   └── DATASET.md                   # [NEW] 数据字典、可疑模式构造说明、校验和
+│   ├── build_dataset.py             # [NEW] 公开数据集分层抽样 + 固定 seed 补全 + 写库
+│   ├── seed.json                    # [NEW] seed、原始数据集版本与 SHA256、汇率与抽样配额
+│   ├── raw/                         # 公开数据集原始文件（手动下载，不提交 git）
+│   ├── aml_dataset.sqlite           # [NEW] 构建结果（许可证允许时提交，否则由 raw + seed 重建）
+│   └── DATASET.md                   # [NEW] 数据来源与许可证、字段映射、typology 对照、校验和
 │
 ├── utils/
 │   ├── __init__.py
 │   ├── deepseek.py                  # Deepseek API 封装（streaming + retry）
 │   ├── qwen.py                      # Qwen API 封装（摘要 / 蒸馏 / 相关性判断）
-│   └── text_processors.py           # 文本抽取工具
+│   └── text_processors.py           # LLM 输出结构化块抽取（extract_tagged_json）
 │
 ├── prompt/
 │   └── prompt.py                    # 所有 prompt 模板集中管理（规划/取证/重规划/校验/研判/蒸馏）
@@ -455,7 +460,7 @@ AML-Guard/
 | `utils/deepseek.py` | Deepseek API 调用，streaming + 指数退避重试 | `Deepseek.chat()`, `Deepseek.stream_chat()` |
 | `utils/qwen.py` | Qwen API：摘要、蒸馏、相关性判断 | `QueryTongyi.chat()` |
 | `prompt/prompt.py` | prompt 模板集中管理 | `prompt_plan`, `prompt_replan`, `prompt_execute`, `prompt_verify`, `prompt_judge`, `prompt_distill` |
-| `data/generate_dataset.py` | 固定 seed 合成交易 / 账户 / 名单 / 负面信息 / 预警，注入已知可疑模式并打标 | `generate(seed)`, `inject_patterns()` |
+| `data/build_dataset.py` | 校验公开数据集原始文件 -> 按 typology 分层抽样案件 -> 截取案件子图与基线历史 -> 固定 seed 补全档案 / 名单 / 负面信息 / 预警 -> 写库并输出带标签的 benchmark | `build(seed)`, `sample_cases()`, `synthesize_enrichment()` |
 | `eval/run_eval.py` | 在标注测试集上批量运行，统计准确率与四类失败归因分布 | `run_benchmark()` |
 
 ### 规则库定义格式
@@ -695,9 +700,10 @@ CREATE INDEX IF NOT EXISTS idx_alert_type ON investigation_records(alert_type);
 ```
 Phase 0 (完成) -> Phase 1 (完成) -> Phase 2 -> Phase 3 -> Phase 4 -> Phase 5 -> Phase 6
 基础功能          Plan-and-Execute   领域建模   MCP Server  规则引擎   双记忆 +   测试 +
-                  编排骨架           + 固定     模块化      + 双路合规  哈希链     Evals
-                  [领域无关]         seed 数据                          审查留痕
-                  [领域无关]         [P0]       [P0]        [P0]       [P0]      [P1]
+                  编排骨架           + 公开     模块化      + 双路合规  哈希链     Evals
+                  [领域无关]         数据集                             审查留痕
+                                     + 固定 seed
+                                     [P0]       [P0]        [P0]       [P0]      [P1]
 ```
 
 ---
@@ -749,7 +755,35 @@ Phase 0 (完成) -> Phase 1 (完成) -> Phase 2 -> Phase 3 -> Phase 4 -> Phase 5
 
 ### Phase 2：领域建模重构（预计 2 天）
 
-**目标**：把领域无关骨架迁移到 AML 调查语义，建立案件模型、证据链与演示数据集
+**目标**：把领域无关骨架迁移到 AML 调查语义，建立案件模型、证据链，接入公开反洗钱数据集并以固定 seed 保证可复现
+
+#### 子任务 2.0：安装场景遗留代码清理与骨架加固
+
+**背景**：Phase 1 以软件安装任务为验证载体，骨架外围遗留了一批与 AML 场景冲突、且不在 2.1-6.3 任何子任务范围内的代码：LLM 生成命令经 `shell=True` 直接执行（与「全本地数据源 + 受控访问」原则冲突）、Kimi 联网搜索、主机信息采集；同时暴露出若干领域无关的骨架缺陷。本任务先清场，后续子任务在干净的基础上做领域化。`DeployBot` 更名、prompt 改写、CLI 改为 `--case`、emoji 清理仍归 2.3，本任务不做。
+
+- **修改文件**：`utils/kimi_search.py`（删除）, `utils/get_system_summary.py`（删除）, `utils/text_processors.py`, `utils/__init__.py`, `utils/deepseek.py`, `utils/qwen.py`, `core/installer.py`, `core/agent.py`, `core/executor.py`, `config/enhanced_config.py`, `main.py`, `requirements.txt`, `CLAUDE.md`
+- **实现**：
+  - 删除遗留能力：
+    - `utils/kimi_search.py`，以及配置、CLI 交互配置、校验告警中全部 `kimi_api_key` / `KIMI_API_KEY`
+    - `utils/get_system_summary.py`（psutil / GPUtil 主机信息采集，仅服务安装场景）；`installer` 中 `system_info` 暂置空字符串，2.1 由 `case_context` 取代
+    - `installer` 的 `run_shell`（`subprocess` + `shell=True`）与 `web_search` 工具；Phase 3 接入 MCP 之前 Executor / Verifier 工具集为空 dict，Verifier 不再与 Executor 共享同一个可写工具集对象
+    - `enhanced_config` 的 legacy 加载（`src.config.config`）与 `main.py` 中对不存在的 `src/` 目录的 `sys.path` 注入
+    - `text_processors` 中安装语义的抽取函数（搜索词 / Python 代码 / shell 命令 / 安装计划 / 完成标记 / 版本号等）
+  - 收拢重复代码：`core/agent.py` 与 `core/executor.py` 各有一份 `_extract_json_block`，合并为 `utils/text_processors.extract_tagged_json(text, tag)`
+  - 骨架加固（领域无关缺陷，接入 MCP 后同样需要）：
+    - `executor_node`：LLM 调用不存在的工具名或参数不匹配时，不再抛 `KeyError` / `TypeError` 中断整图，而是把错误作为 observation 写回本步消息，由 LLM 在下一轮自行修正（仍受 `max_tool_iterations` 约束）
+    - `executor_node`：LLM 输出无法解析（缺标签 / 非法 JSON）时本步记为 `failed`，`result_summary` 写明解析失败原因，走既有 retry / replan 路由
+    - `plan_node`：Planner 输出无法解析时不抛异常，把原因写入 `verdict.failure_reason`，首次规划失败则计划保持为空、经 `route_plan` 走 `abort`；重规划失败则计划不变、`replan_count` 仍 +1
+  - 模型客户端对齐第 3 节：`Deepseek(api_key, model)` 支持指定模型（Planner 用 `deepseek-reasoner`，Executor / Verifier 用 `deepseek-chat`），非 reasoner 模型无 `reasoning_content` 时返回 `None`；`QueryTongyi(api_key)` 通过调用参数传 key，去掉模块级 `dashscope.api_key_file_path` 全局副作用
+  - 配置对齐第 5 节示例：`AIModelConfig` 改为 `deepseek_api_key` / `qwen_api_key`（环境变量 `DEEPSEEK_API_KEY` / `DASHSCOPE_API_KEY`）；`installation` 段改为 `investigation`（`max_investigation_steps` / `max_step_retries` / `max_replans` / `tool_timeout_seconds`），删除 `enable_code_execution` / `enable_web_search` / `search_timeout_seconds`；修复 `print_config_summary` 引用未定义字段 `qwen_api_key_file` 导致 `--show-config` 崩溃
+  - `requirements.txt` 只列当前代码实际 import 的依赖（补上缺失的 `langgraph`，移除 `psutil` / `GPUtil` / `socksio` / 旧 Python 兼容包），后续 Phase 引入新库时同步追加
+  - `CLAUDE.md` 密钥环境变量改为 `DEEPSEEK_API_KEY`、`DASHSCOPE_API_KEY`
+- **验收标准**：
+  - `core/ utils/ config/ main.py requirements.txt CLAUDE.md` 中无 `kimi` 字样；代码中无 `subprocess` / `shell=True`
+  - `DEEPSEEK_API_KEY=dummy python main.py --show-config` 正常输出不崩溃
+  - 幻觉工具名 / 参数不匹配 / Executor 输出不可解析 / Planner 输出不可解析四种场景下图不抛异常，按预期进入修正、retry、replan 或 abort
+  - 既有 34 个测试全部通过（安装语义的测试数据保留，2.1 / 2.3 随状态字段一并迁移）
+- **测试方法**：`pytest tests/unit/test_executor.py tests/unit/test_agent.py tests/unit/test_text_processors.py tests/unit/test_config.py tests/integration/`
 
 #### 子任务 2.1：状态与数据结构领域化
 
@@ -761,18 +795,28 @@ Phase 0 (完成) -> Phase 1 (完成) -> Phase 2 -> Phase 3 -> Phase 4 -> Phase 5
 - **验收标准**：证据 id 单调递增不重复；引用不存在的 id 时 `check_closure` 返回失败明细
 - **测试方法**：`pytest tests/unit/test_plan.py tests/unit/test_evidence.py`
 
-#### 子任务 2.2：固定 seed 合成数据集
+#### 子任务 2.2：公开数据集接入与固定 seed 复现
 
-- **修改文件**：`data/schema.sql`, `data/generate_dataset.py`, `data/seed.json`, `data/DATASET.md`（均新建）
+- **修改文件**：`data/schema.sql`, `data/build_dataset.py`, `data/seed.json`, `data/DATASET.md`（均新建）, `.gitignore`
+- **数据来源分层**：
+  - **交易流水与洗钱标签——公开反洗钱数据集**：首选 SAML-D（Oztas et al., 2023；约 950 万笔交易，交易级 `Is_laundering` / `Laundering_type` 标签，11 类正常 + 17 类可疑 typology，覆盖结构化拆分、Smurfing、跨境高风险地区、行为突变等；时间跨度近一年，可支撑 180 天基线回溯）；备选 IBM AMLworld（Altman et al., NeurIPS 2023 Datasets and Benchmarks；typology 以 fan-in / fan-out / cycle / scatter-gather 等资金图模式为主，采用前需确认时间跨度能否覆盖 180 天基线窗口）。两者都是模拟器生成并已匿名化——真实银行 AML 数据无法公开，这是公开评测的通行做法。字段、时间跨度与许可证以数据集官方页面为准，落地时核对并写入 `DATASET.md`
+  - **公开数据集不提供的部分——固定 seed 补全**：客户 KYC 档案、制裁 / PEP 名单、负面信息语料、预警线索。补全与抽中账户的标签对齐，例如为部分可疑账户的对手方生成带别名 / 音译 / 简繁变体的名单条目（名单关联样本），同时为正常账户生成近似名干扰项（考察名单误报）
 - **实现**：
   - SQLite 表：`transactions`（流水）/ `accounts`（账户档案）/ `watchlist`（名单）/ `adverse_media`（负面信息语料）/ `alerts`（预警线索）
-  - `generate_dataset.py --seed <n>`：单一 seed 驱动全部随机源（`random.Random(seed)` + `numpy.random.default_rng(seed)`，不使用全局随机状态），生成正常账户群体后按比例注入可疑模式（拆分、高频跨境、快进快出、集中收付、名单关联、基线突变），每个注入模式同时写入 ground truth 标签
-  - 为基线偏离规则专门构造两类样本：金额相对自身历史暴增但绝对值不触阈值的账户（考察漏报）、绝对流水大但符合自身历史的活跃账户（考察误报）
-  - 生成产物 `aml_dataset.sqlite` 与 `eval/benchmark.jsonl` **提交进仓库**；`DATASET.md` 记录数据字典、各模式构造逻辑与文件 SHA256
+  - 原始文件手动下载到 `data/raw/`（加入 `.gitignore`）；`seed.json` 记录 seed、数据集名称与版本、原始文件 SHA256、币种折算汇率、各 typology 抽样配额；构建前先校验原始文件 SHA256，不符直接拒绝构建
+  - `build_dataset.py --seed <n>`：单一 seed 驱动全部随机源（`random.Random(seed)` + `numpy.random.default_rng(seed)`，不使用全局随机状态）；每次抽样前按主键稳定排序，不依赖文件行序、dict 顺序或并行执行顺序，保证跨机器一致。流程：
+    1. 按 typology 分层抽样约 200 个案件主体账户（可疑 / 正常按配额，正常样本中保证一定比例的活跃大额账户）
+    2. 截取案件子图：主体账户 + 二度内对手方 + 案件窗口前 180 天历史流水，控制入库体积
+    3. 固定 seed 补全档案 / 名单 / 负面信息 / 预警线索
+    4. 金额按 `seed.json` 中的固定汇率折算为人民币，使 PBOC 阈值规则可直接适用；原币种与原金额保留在独立字段
+  - Ground truth：案件级标签由交易级标签聚合——主体账户在案件窗口内参与任一 `Is_laundering=1` 交易即为「应上报」，否则为「不上报」；`Laundering_type` 作为可疑模式标注保留；补全引入的名单关联样本由构建脚本打标；聚合口径写入 `DATASET.md`
+  - 基线偏离规则的两类样本保证配额：金额相对自身历史暴增但绝对值不触阈值的可疑账户（优先取行为突变类 typology，考察漏报）、绝对流水大但符合自身历史的正常账户（考察误报）
+  - 构建产物 `aml_dataset.sqlite` 与 `eval/benchmark.jsonl`：许可证允许再分发时两者**提交进仓库**；不允许时只提交 `seed.json` 与 `benchmark.jsonl`（仅含原始交易 id、账户 id 与标签），使用者下载原始数据后一条命令重建。`DATASET.md` 记录来源、许可证与再分发结论、字段映射、typology 与本项目可疑模式对照表、产物校验和
+  - 校验和基于按主键排序导出的规范化内容计算，而非 SQLite 文件字节（不同 SQLite 版本的页布局可能不同）
   - 交易表建 `(account, timestamp)` 与 `(counterparty)` 索引，保证 90 天窗口调单与 180 天基线计算响应在秒级
-  - `--verify` 模式：重新生成到临时库并与仓库内文件比对校验和
-- **验收标准**：同一 seed 两次生成校验和一致；`--verify` 通过；抽样案件的 ground truth 与注入模式对得上
-- **测试方法**：`pytest tests/unit/test_data_layer.py`
+  - `--verify` 模式：从原始文件 + seed 重建到临时库，与 `DATASET.md` 记录的校验和比对
+- **验收标准**：原始文件 SHA256 不符时拒绝构建；同一 seed 两次构建校验和一致；`--verify` 通过；抽样案件的 ground truth 可逐条回查到原始交易标签；许可证与再分发结论已写入 `DATASET.md`
+- **测试方法**：`pytest tests/unit/test_data_layer.py`（用仓库内几百行、与原始文件同格式的 fixture 替代完整数据集，断言构建确定性与标签聚合口径）
 
 #### 子任务 2.3：Prompt 与对外接口领域化
 
@@ -786,8 +830,9 @@ Phase 0 (完成) -> Phase 1 (完成) -> Phase 2 -> Phase 3 -> Phase 4 -> Phase 5
 - **测试方法**：`pytest tests/integration/test_agent_loop.py`（Mock LLM，断言使用新状态字段）
 
 **进度追踪**：
+- [x] 2.0 安装场景遗留代码清理与骨架加固 — 删除 utils/kimi_search.py、utils/get_system_summary.py 与 installer 的 run_shell（shell=True）/ web_search 工具，Executor / Verifier 改为两个独立空工具集；agent.py 与 executor.py 重复的 _extract_json_block 收拢为 utils/text_processors.extract_tagged_json（删除安装语义抽取函数）；executor 新增 invoke_tool，幻觉工具名 / 参数不匹配回写 observation，输出不可解析判本步 failed 走 retry；plan_node 首次规划不可解析保持空计划经 route_plan abort，重规划输出非法则计划不变且计入 replan_count；Deepseek 支持 model 参数（Planner reasoner / Executor chat），QueryTongyi 按调用传 key 去掉模块级全局副作用；配置 kimi_api_key -> qwen_api_key（DASHSCOPE_API_KEY）、installation -> investigation，删除 legacy 加载与 src/ 路径注入，修复 --show-config 因 qwen_api_key_file 未定义而崩溃；requirements 补 langgraph，移除 psutil / GPUtil / socksio；CLAUDE.md 环境变量同步；新增 test_text_processors.py / test_config.py 并扩充 executor / agent / agent_loop / wiring 用例，测试 34 -> 62 全部通过
 - [ ] 2.1 状态与数据结构领域化
-- [ ] 2.2 固定 seed 合成数据集
+- [ ] 2.2 公开数据集接入与固定 seed 复现
 - [ ] 2.3 Prompt 与对外接口领域化
 
 ---
@@ -923,7 +968,8 @@ Phase 0 (完成) -> Phase 1 (完成) -> Phase 2 -> Phase 3 -> Phase 4 -> Phase 5
 
 - **修改文件**：`eval/benchmark.jsonl`, `eval/run_eval.py`（新建）
 - **实现**：
-  - 基于公开反洗钱数据集构建约 200 条标注案件，按可疑模式（拆分 / 高频跨境 / 快进快出 / 集中收付 / 名单关联）分层抽样，含正常样本对照
+  - 使用 2.2 基于公开反洗钱数据集构建的约 200 条标注案件（固定 seed 分层抽样，标签由原始交易级标签聚合），按可疑模式（拆分 / 高频跨境 / 快进快出 / 集中收付 / 名单关联 / 行为突变）分层统计，含正常样本对照
+  - 评测报告头部记录 seed、原始数据集版本与 SHA256、模型版本与 `temperature=0`，保证数字可复算
   - 批量运行，统计端到端准确率、误报率、漏报率、平均步骤数，以及四类失败归因分布，输出 Markdown 报告
 - **验收标准**：端到端准确率 >=75%，报告含四类失败分布与典型案例
 
@@ -946,8 +992,9 @@ Phase 0 (完成) -> Phase 1 (完成) -> Phase 2 -> Phase 3 -> Phase 4 -> Phase 5
 
 | 优先级 | 改进点 | 涉及文件 | Phase |
 |--------|--------|----------|-------|
+| P0 | 安装场景遗留代码清理（shell 执行 / Kimi / 主机采集）+ 骨架异常加固 | `utils/`, `core/executor.py`, `core/agent.py`, `config/` | 2 |
 | P0 | 领域建模重构（案件 / 证据链 / prompt / 接口） | `core/plan.py`, `core/evidence.py`, `prompt/`, `core/investigator.py` | 2 |
-| P0 | 固定 seed 合成数据集（提交进仓库，保证评测可复现） | `data/` | 2 |
+| P0 | 公开反洗钱数据集接入 + 固定 seed 抽样与补全（保证评测可复现） | `data/` | 2 |
 | P0 | MCP Server 模块化（调单/档案/规则/名单/负面信息） | `mcp_server/` | 3 |
 | P0 | 受控数据访问（条数上限/脱敏/审计） | `mcp_server/guard.py` | 3 |
 | P0 | 规则引擎（绝对阈值 + 账户基线偏离）+ 条款引用 | `core/rule_engine.py`, `rules/` | 4 |

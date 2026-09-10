@@ -1,21 +1,18 @@
 import json
-import re
 
 from langgraph.graph import END, START, StateGraph
 
 from core.executor import DEFAULT_MAX_RETRIES, build_executor, route_step_result
 from core.plan import AgentState, apply_plan_patch
 from prompt.prompt import prompt_plan, prompt_replan, prompt_verify
+from utils.text_processors import extract_tagged_json
 
 DEFAULT_MAX_REPLANS = 3
 DEFAULT_VERIFIER_MAX_TOOL_ITERATIONS = 4
 
 
-def _extract_json_block(text: str, tag: str):
-    match = re.search(rf"<{tag}>(.*?)</{tag}>", text, re.DOTALL)
-    if not match:
-        raise ValueError(f"no <{tag}> block found in LLM output")
-    return json.loads(match.group(1).strip())
+def _failure_verdict(reason: str) -> dict:
+    return {"passed": False, "evidence": "", "failure_reason": reason}
 
 
 def build_planner(llm, max_replans: int = DEFAULT_MAX_REPLANS):
@@ -36,8 +33,17 @@ def build_planner(llm, max_replans: int = DEFAULT_MAX_REPLANS):
                 memory_context=new_state.get("memory_context", ""),
             )
             content, _ = llm.chat(prompt)
-            new_state["plan"] = _extract_json_block(content, "plan_json")
             new_state["replan_count"] = new_state.get("replan_count", 0)
+            try:
+                initial_plan = extract_tagged_json(content, "plan_json")
+                if not isinstance(initial_plan, list):
+                    raise ValueError("<plan_json> must be a JSON array of steps")
+            except ValueError as e:
+                # Leave the plan empty so route_plan aborts instead of crashing the graph.
+                new_state["plan"] = []
+                new_state["verdict"] = _failure_verdict(f"unparsable planner output: {e}")
+                return new_state
+            new_state["plan"] = initial_plan
         elif _needs_replan(new_state):
             failure_reason = new_state.get("verdict", {}).get("failure_reason", "")
             prompt = prompt_replan.format(
@@ -46,9 +52,18 @@ def build_planner(llm, max_replans: int = DEFAULT_MAX_REPLANS):
                 failure_reason=failure_reason,
             )
             content, _ = llm.chat(prompt)
-            patch = _extract_json_block(content, "patch_json")
-            new_state["plan"] = apply_plan_patch(plan, patch)
             new_state["replan_count"] = new_state.get("replan_count", 0) + 1
+            try:
+                patch = extract_tagged_json(content, "patch_json")
+                if not isinstance(patch, list):
+                    raise ValueError("<patch_json> must be a JSON array of operations")
+                patched_plan = apply_plan_patch(plan, patch)
+            except (ValueError, KeyError, TypeError) as e:
+                # Keep the plan unchanged; the attempt still counts toward max_replans,
+                # so a model that keeps emitting bad patches is bounded by route_plan.
+                new_state["verdict"] = _failure_verdict(f"invalid replan output: {e}")
+                return new_state
+            new_state["plan"] = patched_plan
             new_state["consecutive_failures"] = 0
             new_state["verdict"] = {}  # stale failure_reason is now addressed by the patch
         else:

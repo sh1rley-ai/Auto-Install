@@ -81,3 +81,34 @@ def test_full_loop_replans_after_verifier_rejects_then_succeeds():
     assert result["replan_count"] == 1
     assert [step["id"] for step in result["plan"]] == [1, 2]
     assert all(step["status"] == "done" for step in result["plan"])
+
+
+def test_full_loop_aborts_cleanly_when_planner_output_unparsable():
+    graph = build_graph(FakeLLM(["no plan today"]), FakeLLM([]), {}, FakeLLM([]), {})
+
+    result = graph.invoke(make_initial_state())
+
+    assert result["plan"] == []
+    assert result["verdict"]["passed"] is False
+    assert "unparsable planner output" in result["verdict"]["failure_reason"]
+
+
+def test_full_loop_recovers_from_hallucinated_tool_name():
+    planner_llm = FakeLLM([
+        '<plan_json>[{"id": 1, "description": "look up account A1", "status": "pending", "result_summary": ""}]</plan_json>'
+    ])
+    executor_llm = FakeLLM([
+        '<action_json>{"type": "tool_call", "tool": "web_search", "args": {"query": "A1"}}</action_json>',
+        '<action_json>{"type": "tool_call", "tool": "lookup", "args": {"key": "A1"}}</action_json>',
+        '<action_json>{"type": "finish_step", "status": "done", "result_summary": "record A1"}</action_json>',
+    ])
+    verifier_llm = FakeLLM([
+        '<action_json>{"type": "finish_step", "status": "done", "result_summary": "record A1 supports the step"}</action_json>',
+    ])
+    executor_tools = {"lookup": lambda key: f"record {key}"}
+
+    graph = build_graph(planner_llm, executor_llm, executor_tools, verifier_llm, {})
+    result = graph.invoke(make_initial_state(goal="investigate A1"))
+
+    assert result["plan"][0]["status"] == "done"
+    assert result["verdict"]["passed"] is True

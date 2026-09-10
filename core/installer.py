@@ -1,24 +1,25 @@
 """
-Main Installation Orchestrator
-Coordinates the entire automated software installation process.
+Main Investigation Orchestrator
+Coordinates one end-to-end run of the Plan-and-Execute agent graph.
 """
 
-import subprocess
 from typing import Any, Dict
 
 from .history_manager import HistoryManager
 from .logger import InstallationLogger
 
-DEFAULT_SHELL_TIMEOUT_SECONDS = 120
+PLANNER_MODEL = "deepseek-reasoner"
+EXECUTOR_MODEL = "deepseek-chat"
 
 
 class DeployBot:
     """
-    Main class that orchestrates the automated software installation process.
+    Main class that orchestrates one agent run.
 
     Delegates the actual Plan-and-Execute-and-Verify loop to the LangGraph
     parent graph (core.agent.build_graph); this class adapts that graph to the
     stable interface main.py expects (install_software / get_installation_status).
+    Renamed to AMLGuard.investigate() in task 2.3.
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -30,89 +31,61 @@ class DeployBot:
         """
         self.config = config
 
-        # Initialize AI models and search
+        # Initialize AI models and the agent tool sets
         self._initialize_models()
 
         # Initialize history and logging
-        self.history_manager = HistoryManager(summarizer=self.deepseek)
+        self.history_manager = HistoryManager(summarizer=self.executor_llm)
         self.logger = InstallationLogger()
 
         # Installation state
-        self.max_steps = 30
+        self.max_steps = config.get('max_steps', 30)
         self.current_step = 0
         self.installation_complete = False
 
     def _initialize_models(self):
-        """Initialize AI models, search, and the tool set exposed to the agent graph."""
+        """Initialize model clients and the tool sets exposed to the agent graph."""
         # Import here to avoid circular imports
         from utils.deepseek import Deepseek
-        from utils.kimi_search import KimiSearch
-        from utils.get_system_summary import get_system_summary
 
-        self.deepseek = Deepseek(self.config['deepseek_api_key'])
-        self.kimi_search = KimiSearch(self.config['kimi_api_key'])
-        self.get_system_summary = get_system_summary
+        self.planner_llm = Deepseek(self.config['deepseek_api_key'], model=PLANNER_MODEL)
+        self.executor_llm = Deepseek(self.config['deepseek_api_key'], model=EXECUTOR_MODEL)
 
-        # Plain-Python tool set for the Executor/Verifier subgraphs. Superseded
-        # by mcp_server/ (Phase 2), which adds a shell command blacklist and
-        # runs tools behind the MCP protocol instead of in-process callables.
-        self.tools = {
-            "web_search": self._web_search_tool,
-            "run_shell": self._run_shell_tool,
-        }
-
-    def _web_search_tool(self, query: str) -> str:
-        return self.kimi_search.get_search_res(query)
-
-    def _run_shell_tool(self, command: str, timeout: int = DEFAULT_SHELL_TIMEOUT_SECONDS) -> str:
-        try:
-            result = subprocess.run(
-                command, shell=True, capture_output=True, text=True, timeout=timeout
-            )
-            return (
-                f"returncode: {result.returncode}\n"
-                f"stdout:\n{result.stdout}\n"
-                f"stderr:\n{result.stderr}"
-            )
-        except subprocess.TimeoutExpired:
-            return f"returncode: -1\nstdout:\nstderr:\ncommand timed out after {timeout}s"
+        # No tools until MCP tools are bound in Phase 3. Two distinct dicts so the
+        # Verifier never shares the Executor's tool set object: once real tools
+        # land, the Verifier gets only the read-only subset.
+        self.executor_tools: Dict[str, Any] = {}
+        self.verifier_tools: Dict[str, Any] = {}
 
     def install_software(self, user_request: str) -> bool:
         """
-        Main method to install software based on user request.
+        Run the agent graph for one request.
 
         Args:
-            user_request: User's software installation request
+            user_request: User's request text
 
         Returns:
-            True if installation completed successfully, False otherwise
+            True if the run passed verification, False otherwise
         """
         try:
             from core.agent import build_graph
 
-            # Get system information
-            system_info = self.get_system_summary()
+            # Replaced by case_context in task 2.1
+            system_info = ""
 
             # Log initial request
             self.logger.log_user_request(user_request, system_info)
-            self.history_manager.add_entry(
-                "user_request",
-                user_request,
-                {"system_info": system_info}
-            )
+            self.history_manager.add_entry("user_request", user_request)
 
-            print(f"开始安装: {user_request}")
-            print("=" * 50)
-            print("系统信息:")
-            print(system_info)
+            print(f"开始处理: {user_request}")
             print("=" * 50)
 
             graph = build_graph(
-                planner_llm=self.deepseek,
-                executor_llm=self.deepseek,
-                executor_tools=self.tools,
-                verifier_llm=self.deepseek,
-                verifier_tools=self.tools,
+                planner_llm=self.planner_llm,
+                executor_llm=self.executor_llm,
+                executor_tools=self.executor_tools,
+                verifier_llm=self.executor_llm,
+                verifier_tools=self.verifier_tools,
             )
 
             initial_state = {
@@ -146,25 +119,25 @@ class DeployBot:
 
             if self.installation_complete:
                 self.logger.log_completion(True, verdict.get("evidence", ""))
-                print("\n✅ 安装完成！")
+                print("\n[OK] 已完成并通过校验")
             else:
-                failure_reason = verdict.get("failure_reason") or "未通过验证或已放弃"
-                self.logger.log_error(f"安装未完成: {failure_reason}")
-                print(f"\n❌ 安装未完成: {failure_reason}")
+                failure_reason = verdict.get("failure_reason") or "未通过校验或已放弃"
+                self.logger.log_error(f"未完成: {failure_reason}")
+                print(f"\n[FAILED] 未完成: {failure_reason}")
 
             return self.installation_complete
 
         except Exception as e:
-            error_msg = f"安装过程中发生错误: {str(e)}"
+            error_msg = f"执行过程中发生错误: {str(e)}"
             self.logger.log_error(error_msg)
-            print(f"\n❌ {error_msg}")
+            print(f"\n[ERROR] {error_msg}")
             return False
 
         finally:
             self._finalize_installation()
 
     def _finalize_installation(self):
-        """Finalize installation process with cleanup and summary."""
+        """Finalize the run with cleanup and summary."""
         try:
             # Save history
             history_file = f"logs/history_{self.logger.session_name}.json"
@@ -175,22 +148,22 @@ class DeployBot:
                 'total_time': f"{self.current_step} 步骤",
                 'successful_steps': self.current_step,
                 'failed_steps': 0,  # Could be enhanced to track failures
-                'search_count': len([h for h in self.history_manager.history if h['type'] == 'search_query']),
-                'execution_count': len([h for h in self.history_manager.history if h['type'] == 'code_execution']),
+                'search_count': 0,
+                'execution_count': 0,
                 'history_file': history_file,
-                'recommendations': '请检查日志文件以获取详细的安装过程记录。'
+                'recommendations': '请检查日志文件以获取详细的执行过程记录。'
             }
 
             self.logger.create_summary_section(summary_data)
 
-            print(f"\n📋 安装日志已保存到: {self.logger.get_log_file_path()}")
-            print(f"📚 历史记录已保存到: {history_file}")
+            print(f"\n日志已保存到: {self.logger.get_log_file_path()}")
+            print(f"历史记录已保存到: {history_file}")
 
         except Exception as e:
-            print(f"⚠️ 保存日志时出错: {e}")
+            print(f"[WARN] 保存日志时出错: {e}")
 
     def get_installation_status(self) -> Dict[str, Any]:
-        """Get current installation status."""
+        """Get current run status."""
         return {
             'current_step': self.current_step,
             'max_steps': self.max_steps,

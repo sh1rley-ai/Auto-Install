@@ -1,22 +1,16 @@
 """
-Utilities module for automated software installation.
+Utilities module for AML-Guard.
 
-This module provides utility functions and classes for:
-- AI model integrations (Deepseek, Qwen, Kimi)
-- System information detection
-- Code execution helpers
-- Text processing utilities
+This module provides:
+- AI model clients (Deepseek, Qwen)
+- Structured block extraction from LLM output
 """
 from .deepseek import Deepseek
 from .qwen import QueryTongyi
-from .kimi_search import KimiSearch
-from .get_system_summary import get_system_summary
-from .text_processors import TextProcessor
+from .text_processors import extract_tagged_json
 
 __all__ = [
-    'Deepseek', 
-    'QueryTongyi', 
-    'KimiSearch', 
-    'get_system_summary',
-    'TextProcessor'
+    'Deepseek',
+    'QueryTongyi',
+    'extract_tagged_json',
 ]

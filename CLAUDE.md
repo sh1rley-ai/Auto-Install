@@ -10,7 +10,7 @@ python main.py --show-config
 
 ## 开发规范
 
-- **禁止硬编码 API Key**：所有密钥只能从 `config/user_config.json` 或环境变量（`DEEPSEEK_API_KEY`、`KIMI_API_KEY`）读取，不得出现在任何源代码文件中
+- **禁止硬编码 API Key**：所有密钥只能从 `config/user_config.json` 或环境变量（`DEEPSEEK_API_KEY`、`DASHSCOPE_API_KEY`）读取，不得出现在任何源代码文件中
 - **禁止使用 emoji**：代码、注释、日志输出、文档均不得出现 emoji 字符
 - **部署前主动进行安全审查**：检查代码中的漏洞
 
