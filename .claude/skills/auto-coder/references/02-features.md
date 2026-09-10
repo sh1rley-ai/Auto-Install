@@ -2,14 +2,15 @@
 
 | 特点 | 说明 |
 |------|------|
-| **Plan-and-Execute 架构** | Planner 生成结构化计划并维护计划状态（每步含 id / 描述 / 状态），Executor 按步执行；执行结果驱动 Planner 对计划增删改，动态重规划 |
-| **Agent 执行闭环** | Executor 每步内部：CoT 推理决策 -> Tool Calling（search / shell / finish_step）-> 结果反馈驱动下一步；失败自动重试，连续失败触发重规划 |
-| **独立 Verifier Agent** | 验证与执行分离（Generator-Critic）：Verifier 以空白上下文、对抗性立场验证安装可用性，复用 Executor 子图代码，只换 prompt 与工具面（只读 shell），输出结构化裁决 passed / evidence / failure_reason |
-| **环境感知** | 启动时自动探测 OS / 包管理器（brew / apt / yum）/ conda / sudo 权限 / GPU / CPU，注入规划上下文，同一软件在不同环境生成不同安装方案 |
-| **模块化 MCP Server** | 环境探测、联网搜索、受控 shell 执行封装为标准 MCP 工具，通过 stdio 暴露，可被 Claude Desktop 等任意 MCP 客户端直接复用 |
-| **双层记忆机制** | 短期：会话内历史超阈值自动触发 LLM 总结压缩；长期：安装成功后 LLM 蒸馏成功路径（剔除试错分支）存入 SQLite，跨会话复用 |
-| **结构化日志与回放** | 每步记录 step_type / content / timestamp 的 JSONL 轨迹，支持失败归因分析与执行轨迹回放；同时输出人类可读 Markdown 报告 |
-| **受控代码执行** | shell 命令经受控执行器运行：黑名单拦截、超时控制、stdout/stderr 全量捕获回传 |
-| **量化评估** | 150 个真实 GitHub 工具测试集，端到端安装成功率 72% |
+| **Plan-and-Execute 架构** | Planner 生成结构化调查计划并维护计划状态（每步含 id / 描述 / 状态），Executor 按步取证；取证结果驱动 Planner 对计划增删改，动态重规划 |
+| **Agent 执行闭环** | Executor 每步内部：CoT 推理决策 -> Tool Calling（交易调单 / 规则检索 / 名单筛查 / finish_step）-> 结果反馈驱动下一步；失败自动重试，连续失败触发重规划 |
+| **独立 Verifier Agent** | 校验与执行分离（Generator-Critic）：Verifier 以空白上下文、对抗性立场校验研判结论的证据完整性，复用 Executor 子图代码，只换 prompt 与工具面（只读查询），输出结构化裁决 passed / evidence / failure_reason |
+| **规则引擎与 LLM 双路合规校验** | 规则引擎做确定性匹配，同时支持绝对阈值（大额 / 高频跨境 / 拆分 / 名单命中）与账户历史基线偏离（金额倍数 / 笔数 z-score / 新对手方占比），后者避免「活跃大客户恒误报、金额压阈值恒漏报」；LLM 结合证据链做情境研判，两路结论合并入报告，不一致时标记 needs_human_review 交人工复核 |
+| **结论附证据与规则引用** | 报告中每条结论关联 evidence_refs（工具调用记录 id）与 rule_refs（监管条款出处），报告经 JSON Schema 校验，无引用结论不得落地 |
+| **模块化 MCP Server** | 交易调单、客户档案、监管规则库检索、名单筛查、负面信息检索封装为标准 MCP 工具，通过 stdio 暴露，可被 Claude Desktop 等任意 MCP 客户端直接复用 |
+| **双层记忆机制** | 短期：单次调查内消息超阈值自动触发 LLM 总结压缩；长期：调查通过校验后 LLM 蒸馏标准调查路径（剔除试错分支）存入 SQLite，同类案件跨会话复用，平均调查步骤下降约 30% |
+| **哈希链审查日志与回放** | 每步记录 step_type / content / timestamp 的 JSONL 轨迹，每条携带前一条的哈希构成防篡改链，`--verify-audit` 校验完整性并定位首个断裂点；全链路留痕支持合规回溯与轨迹回放，同时输出人类可读 Markdown 研判报告 |
+| **受控数据访问** | 交易调单与名单筛查经受控访问层：查询范围与返回条数上限、超时控制、敏感字段脱敏后入 LLM 上下文、访问全量审计留痕 |
+| **量化评估** | 基于公开反洗钱数据集构建约 200 条标注测试集，端到端调查准确率约 75%，按规划 / 工具 / 校验 / 幻觉输出四类归因统计失败分布 |
 
 ---
